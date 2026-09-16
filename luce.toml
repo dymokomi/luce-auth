@@ -1,0 +1,9 @@
+[package]
+name = "luce_auth"
+source = "src"
+
+[exports]
+auth = "luce_auth.auth"
+
+[dependencies]
+luce_crypto = "../luce-crypto"

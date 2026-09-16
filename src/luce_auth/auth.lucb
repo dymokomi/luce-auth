@@ -1,0 +1,27 @@
+import luce_auth.records as records
+import luce_auth.vault as vault
+import crypto_native
+
+pub let invalid = records.invalid
+pub let forged = vault.forged
+pub let production_memory_kib = vault.production_memory_kib
+pub let production_passes = vault.production_passes
+pub let production_lanes = vault.production_lanes
+pub type Invite = records.Invite
+
+pub func encode_invite(invite: Invite, out: u8[]) -> usize!:
+    return try records.encode_invite(invite, out)
+
+pub func decode_invite(data: const u8[]) -> Invite!:
+    return try records.decode_invite(data)
+
+pub func wrap_vault(password: const u8[], salt: const u8[], nonce: const u8[], plaintext: const u8[],
+    ciphertext: u8[], tag: u8[], memory_kib: u32 = 8192, passes: u32 = 1, lanes: u32 = 1) -> !:
+    try vault.wrap(password, salt, nonce, plaintext, ciphertext, tag, memory_kib, passes, lanes)
+
+pub func unwrap_vault(password: const u8[], salt: const u8[], nonce: const u8[], ciphertext: const u8[],
+    tag: const u8[], plaintext: u8[], memory_kib: u32 = 8192, passes: u32 = 1, lanes: u32 = 1) -> !:
+    try vault.unwrap(password, salt, nonce, ciphertext, tag, plaintext, memory_kib, passes, lanes)
+
+pub func token_digest(secret: const u8[], output: u8[]) -> usize!:
+    return try crypto_native.digest(secret, output, "sha256")

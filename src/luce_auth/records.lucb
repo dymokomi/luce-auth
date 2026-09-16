@@ -1,0 +1,51 @@
+## LID1 invite records. Single-use codes; secrets are never stored here.
+import crypto_native
+
+pub let invalid = crypto_native.invalid
+pub let magic = b"LID1"
+
+pub struct Invite:
+    pub var flags: u8
+    pub var expiry_unix: u32
+    pub var code: str
+    pub var role: u8
+    pub var nonce: u8[32]
+
+pub func encode_invite(invite: Invite, out: u8[]) -> usize!:
+    if invite.code.length == 0 or invite.code.length > 64: error(invalid, "invite code length")
+    let payload = 1 + 4 + 2 + invite.code.length + 1 + 32
+    let need = 7 + payload
+    if out.length < need: error(invalid, "invite encoding buffer is too small")
+    for i in 0..<(usize)4: out[i] = magic[i]
+    out[4] = 1
+    out[5] = (u8)payload
+    out[6] = (u8)(payload >> 8)
+    out[7] = invite.flags
+    out[8] = (u8)invite.expiry_unix
+    out[9] = (u8)(invite.expiry_unix >> 8)
+    out[10] = (u8)(invite.expiry_unix >> 16)
+    out[11] = (u8)(invite.expiry_unix >> 24)
+    out[12] = (u8)invite.code.length
+    out[13] = (u8)(invite.code.length >> 8)
+    for i in 0..<invite.code.length: out[14 + i] = invite.code.bytes[i]
+    let after = 14 + invite.code.length
+    out[after] = invite.role
+    for i in 0..<(usize)32: out[after + 1 + i] = invite.nonce[i]
+    return need
+
+pub func decode_invite(data: const u8[]) -> Invite!:
+    if data.length < 47: error(invalid, "truncated invite")
+    for i in 0..<(usize)4:
+        if data[i] != magic[i]: error(invalid, "not an LID1 record")
+    if data[4] != 1: error(invalid, "not an invite record")
+    let payload = (usize)data[5] | ((usize)data[6] << 8)
+    if data.length != 7 + payload: error(invalid, "invite length mismatch")
+    let flags = data[7]
+    let expiry = (u32)data[8] | ((u32)data[9] << 8) | ((u32)data[10] << 16) | ((u32)data[11] << 24)
+    let code_len = (usize)data[12] | ((usize)data[13] << 8)
+    if code_len == 0 or code_len > 64: error(invalid, "invite code length")
+    let after = 14 + code_len
+    if after + 1 + 32 != data.length: error(invalid, "invite code length")
+    var invite = Invite(flags = flags, expiry_unix = expiry, code = (str)data[14..<after], role = data[after])
+    for i in 0..<(usize)32: invite.nonce[i] = data[after + 1 + i]
+    return invite
