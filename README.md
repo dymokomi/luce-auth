@@ -30,5 +30,22 @@ Raise them before any real deployment. Experimental; not a reviewed identity
 provider.
 
 ```sh
-python3 tests/run.py --base ../luce-base/build/luce-base --luce ../luce/build/luce
+python3 tools/bootstrap.py
+python3 tests/run.py --mode all
+python3 tests/sanitize.py --base build/toolchain/luce-base
 ```
+
+Bootstrap verifies pinned sibling sources and builds compilers inside this package.
+The test runner also accepts explicit `--base` and `--luce` paths. Tests use isolated
+temporary databases and cover all four native optimization levels plus C debug/
+release, including an actual Luce consumer. Registration regression coverage checks
+that a duplicate account does not replace its password or consume the invitation,
+and that failed/successful acceptance state survives reopen. Bootstrap checks and
+creation share a transaction with a common marker write, because Prism detects
+write overlap rather than read predicates. A two-worker bootstrap test is repeated
+eight times per mode and requires exactly one first user. Registration commit and
+compaction use bounded one-second writer waits. This does not make all auth
+operations race-free or eliminate ambiguous outcomes after a committed write.
+Sanitizers instrument the native fixtures and runtime, not the high-level Luce
+facade. Broader concurrency/fault injection, production KDF settings and
+credential custody still require hardening.

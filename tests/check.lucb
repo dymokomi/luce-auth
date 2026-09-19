@@ -1,20 +1,10 @@
-import files
 import interop
 import auth
 import prism
 
-func dir() -> str:
-    return "/tmp/luce-auth-test"
-
-func db() -> str:
-    return "/tmp/luce-auth-test/root.db"
-
 pub func main(arguments: str[]) -> i32!:
-    discard(arguments)
-    files.delete_path(dir(), true) catch failure:
-        discard(failure)
-    try files.make_directory(dir())
-    let authority = try auth.Authority.open(db(), "secret")
+    assert(arguments.length == 3)
+    let authority = try auth.Authority.open(arguments[1], "secret")
     defer authority.release()
     try authority.value().bootstrap("alice", "correct horse")
     var again = false
@@ -58,10 +48,7 @@ pub func main(arguments: str[]) -> i32!:
         extra.release()
         assert(false)
     assert(gone)
-    files.delete_path("/tmp/luce-auth-attach", true) catch failure:
-        discard(failure)
-    try files.make_directory("/tmp/luce-auth-attach")
-    let store = try prism.Store.open("/tmp/luce-auth-attach/root.db", token = "secret")
+    let store = try prism.Store.open(arguments[2], token = "secret")
     defer store.release()
     let attached = try auth.Authority.attach(store.value())
     defer attached.release()

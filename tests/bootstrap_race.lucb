@@ -1,0 +1,58 @@
+## Borrow native authorities until worker join; managed references stay on main.
+import auth
+import prism
+import thread
+
+var first: auth.Authority*?
+var second: auth.Authority*?
+var ready: @u64
+var start: @u64
+var successes: @u64
+var conflicts: @u64
+var unexpected: @u64
+
+func attempt(authority: auth.Authority*, name: str):
+    discard(ready.add(1, .release))
+    while start.load(.acquire) == 0: thread.sleep(1)
+    authority.bootstrap(name, "test-password") catch failure:
+        if failure.code == prism.conflict:
+            discard(conflicts.add(1, .relaxed))
+        else:
+            print(failure.message)
+            discard(unexpected.add(1, .relaxed))
+        return
+    discard(successes.add(1, .relaxed))
+
+func first_worker(raw: void*?):
+    discard(raw)
+    if let authority = first: attempt(authority, "alice")
+
+func second_worker(raw: void*?):
+    discard(raw)
+    if let authority = second: attempt(authority, "bob")
+
+pub func main(arguments: str[]) -> i32!:
+    assert(arguments.length == 2)
+    let store = try prism.Store.open(arguments[1], token = "test-token")
+    defer store.release()
+    let a = try auth.Authority.attach(store.value())
+    defer a.release()
+    let b = try auth.Authority.attach(store.value())
+    defer b.release()
+    first = a.value()
+    second = b.value()
+    var one = try thread.spawn(first_worker, none, name = "bootstrap-one")
+    var two = try thread.spawn(second_worker, none, name = "bootstrap-two")
+    while ready.load(.acquire) != 2: thread.sleep(1)
+    start.store(1, .release)
+    try one.join()
+    try two.join()
+    assert(successes.load(.acquire) == 1)
+    assert(conflicts.load(.acquire) == 1 and unexpected.load(.acquire) == 0)
+    let snapshot = try store.value().snapshot()
+    defer snapshot.release()
+    let users = try snapshot.value().children("/users")
+    defer users.release()
+    assert(users.value().count() == 1)
+    print("PASS concurrent bootstrap publishes exactly one first user")
+    return 0

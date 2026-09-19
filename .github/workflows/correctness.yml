@@ -1,0 +1,78 @@
+name: Native authentication correctness
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  correctness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: luce-auth
+      - name: Read source pins
+        id: pins
+        shell: bash
+        run: |
+          echo "base=$(tr -d '\n' < luce-auth/bootstrap/BASE)" >> "$GITHUB_OUTPUT"
+          echo "luce=$(tr -d '\n' < luce-auth/bootstrap/LUCE)" >> "$GITHUB_OUTPUT"
+          echo "prism=$(tr -d '\n' < luce-auth/bootstrap/PRISM)" >> "$GITHUB_OUTPUT"
+          echo "tls=$(tr -d '\n' < luce-auth/bootstrap/TLS)" >> "$GITHUB_OUTPUT"
+          echo "crypto=$(tr -d '\n' < luce-auth/bootstrap/CRYPTO)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: dymokomi/luce-base
+          ref: ${{ steps.pins.outputs.base }}
+          path: luce-base
+      - uses: actions/checkout@v4
+        with:
+          repository: dymokomi/luce
+          ref: ${{ steps.pins.outputs.luce }}
+          path: luce
+      - uses: actions/checkout@v4
+        with:
+          repository: dymokomi/luce-prism
+          ref: ${{ steps.pins.outputs.prism }}
+          path: luce-prism
+      - uses: actions/checkout@v4
+        with:
+          repository: dymokomi/luce-tls
+          ref: ${{ steps.pins.outputs.tls }}
+          path: luce-tls
+      - uses: actions/checkout@v4
+        with:
+          repository: dymokomi/luce-crypto
+          ref: ${{ steps.pins.outputs.crypto }}
+          path: luce-crypto
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Bootstrap into package build directory
+        working-directory: luce-auth
+        run: python3 tools/bootstrap.py
+      - name: Test all six compiler modes
+        working-directory: luce-auth
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tests/run.py --mode all 2>&1 | tee build/correctness.log
+      - name: Native authentication memory safety
+        working-directory: luce-auth
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tests/sanitize.py --base build/toolchain/luce-base 2>&1 | tee build/sanitize.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: authentication-tests-${{ matrix.os }}
+          path: |
+            luce-auth/build/correctness.log
+            luce-auth/build/sanitize.log

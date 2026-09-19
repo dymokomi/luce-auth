@@ -1,0 +1,48 @@
+## A rejected registration must not consume its one-use invitation.
+import auth
+import prism
+
+pub func main(arguments: str[]) -> i32!:
+    assert(arguments.length == 2)
+    let authority = try auth.Authority.open(arguments[1], "test-secret")
+    defer authority.release()
+    try authority.value().bootstrap("alice", "test-password")
+    let invitation = try authority.value().invite()
+    defer invitation.release()
+    let code = try invitation.value().text_at()
+    var rejected = false
+    authority.value().accept(code, "alice", "duplicate") catch failure:
+        assert(failure.code == prism.conflict)
+        rejected = true
+    assert(rejected)
+    let original = try authority.value().login("alice", "test-password")
+    defer original.release()
+    authority.value().close()
+    let reopened = try auth.Authority.open(arguments[1], "test-secret")
+    defer reopened.release()
+    let preserved = try reopened.value().login("alice", "test-password")
+    defer preserved.release()
+    var second_bootstrap = false
+    reopened.value().bootstrap("mallory", "not-invited") catch failure:
+        assert(failure.code == prism.conflict)
+        second_bootstrap = true
+    assert(second_bootstrap)
+    # Retrying with a new account must succeed with the same code.
+    try reopened.value().accept(code, "bob", "test-password")
+    let token = try reopened.value().login("bob", "test-password")
+    defer token.release()
+    let name = try reopened.value().verify(try token.value().text_at())
+    defer name.release()
+    assert(try name.value().text_at() == "bob")
+    reopened.value().close()
+    let final_store = try auth.Authority.open(arguments[1], "test-secret")
+    defer final_store.release()
+    var reused = false
+    final_store.value().accept(code, "carol", "test-password") catch failure:
+        assert(failure.code == prism.invalid)
+        reused = true
+    assert(reused)
+    let durable = try final_store.value().login("bob", "test-password")
+    defer durable.release()
+    print("PASS failed registration preserves invitation and password across reopen; successful acceptance stays consumed")
+    return 0

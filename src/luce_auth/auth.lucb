@@ -92,22 +92,30 @@ pub struct Authority:
     pub static func open(path: str, token: str) -> interop.Reference[Authority]!:
         if token.length == 0:
             error(invalid, "auth store token is required")
-        let native = try new Authority() in memory.heap
-        errdefer native.close()
-        native.store = try prism.Store.open(path, token = token)
+        let store = try prism.Store.open(path, token = token)
+        let native = new Authority() in memory.heap catch failure:
+            store.release()
+            error(failure.code, failure.message)
+        native.store = store
         native.borrowed = none
         native.owns = true
         native.alive = true
-        try native.ensure_dirs()
+        native.ensure_dirs() catch failure:
+            native.close()
+            free(native) in memory.heap
+            error(failure.code, failure.message)
+        # adopt consumes/disposes native even when its allocation fails.
         return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
 
     pub static func attach(store: prism.Store*) -> interop.Reference[Authority]!:
         let native = try new Authority() in memory.heap
-        errdefer native.close()
         native.borrowed = store
         native.owns = false
         native.alive = true
-        try native.ensure_dirs()
+        native.ensure_dirs() catch failure:
+            native.close()
+            free(native) in memory.heap
+            error(failure.code, failure.message)
         return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
 
     func engine() -> prism.Store*!:
@@ -136,14 +144,7 @@ pub struct Authority:
     pub func bootstrap(name: str, password: str) -> !:
         if not valid_name(name) or password.length == 0:
             error(invalid, "invalid user or password")
-        let store = try self.engine()
-        let snap = try store.snapshot()
-        defer snap.release()
-        let kids = try snap.value().children("/users")
-        defer kids.release()
-        if kids.value().count() != 0:
-            error(conflict, "authority already has users")
-        try self.put_user(name, password)
+        try self.put_user(name, password, first_user = true)
 
     pub func invite() -> interop.Reference[prism.Value]!:
         var raw: u8[16]
@@ -171,17 +172,9 @@ pub struct Authority:
         var path_buf: u8[48]
         let n = try join_prefix(b"/invites/", code, path_buf)
         let invite = (str)path_buf[..<n]
-        let store = try self.engine()
-        let tx = try store.begin()
-        defer tx.release()
-        tx.value().get(invite, "state") catch failure:
-            error(invalid, "invitation is not valid")
-        try tx.value().remove(invite)
-        discard(try tx.value().commit())
-        discard(try store.bake())
-        try self.put_user(name, password)
+        try self.put_user(name, password, invite)
 
-    func put_user(name: str, password: str) -> !:
+    func put_user(name: str, password: str, invitation: str = "", first_user: bool = false) -> !:
         var path_buf: u8[48]
         let n = try user_path(name, path_buf)
         let path = (str)path_buf[..<n]
@@ -192,16 +185,34 @@ pub struct Authority:
         let store = try self.engine()
         let tx = try store.begin()
         defer tx.release()
-        tx.value().add(path, "file") catch failure:
+        if first_user:
+            let kids = try tx.value().children("/users")
+            defer kids.release()
+            if kids.value().count() != 0:
+                error(conflict, "authority already has users")
+            # Prism detects write overlap, not read predicates. Competing first
+            # users must both write this same field to force a commit conflict.
+            let marker = try prism.Value.text(name)
+            defer marker.release()
+            try tx.value().set("/users", "bootstrap_owner", marker)
+        if try tx.value().contains(path):
             error(conflict, "user already exists")
+        if invitation.length > 0:
+            let state = tx.value().get(invitation, "state") catch failure:
+                error(invalid, "invitation is not valid")
+            defer state.release()
+            if try state.value().text_at() != "open":
+                error(invalid, "invitation is not valid")
+            try tx.value().remove(invitation)
+        try tx.value().add(path, "file")
         let salt_value = try prism.Value.array(prism.DType.uint8, [16], salt)
         defer salt_value.release()
         let hash_value = try prism.Value.array(prism.DType.uint8, [32], hashed)
         defer hash_value.release()
         try tx.value().set(path, "salt", salt_value)
         try tx.value().set(path, "hash", hash_value)
-        discard(try tx.value().commit())
-        discard(try store.bake())
+        discard(try tx.value().commit(wait_ms = 1000))
+        discard(try store.bake(wait_ms = 1000))
 
     pub func login(name: str, password: str) -> interop.Reference[prism.Value]!:
         if not valid_name(name) or password.length == 0:
