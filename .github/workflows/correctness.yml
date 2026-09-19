@@ -69,6 +69,13 @@ jobs:
         run: |
           set -o pipefail
           python3 tests/sanitize.py --base build/toolchain/luce-base 2>&1 | tee build/sanitize.log
+      - name: Native macOS leak detection
+        if: runner.os == 'macOS'
+        working-directory: luce-auth
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tests/heap.py 2>&1 | tee build/heap.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -76,3 +83,4 @@ jobs:
           path: |
             luce-auth/build/correctness.log
             luce-auth/build/sanitize.log
+            luce-auth/build/heap.log
