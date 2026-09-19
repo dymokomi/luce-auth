@@ -76,6 +76,10 @@ jobs:
         run: |
           set -o pipefail
           python3 tests/heap.py 2>&1 | tee build/heap.log
+      - name: Test timeout descendant cleanup
+        if: always()
+        working-directory: luce-auth
+        run: python3 tests/test_heap_process.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

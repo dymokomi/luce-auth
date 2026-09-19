@@ -49,3 +49,12 @@ operations race-free or eliminate ambiguous outcomes after a committed write.
 Sanitizers instrument the native fixtures and runtime, not the high-level Luce
 facade. Broader concurrency/fault injection, production KDF settings and
 credential custody still require hardening.
+
+On macOS, `python3 tests/heap.py` requires fixture completion and a zero-leak
+report, with each ordinary child exit checked separately on a fresh store. Tiny
+C and native Luce Base canaries distinguish host instrumentation failures from
+authentication/runtime failures. Timeouts remain failures: the runner records
+only its own process group's states and bounded macOS stack samples, then kills
+and reaps that test group. `python3 tests/test_heap_process.py` verifies status
+preservation and descendant cleanup even after the immediate parent has exited.
+The C canary is a test oracle, never part of the library implementation.
