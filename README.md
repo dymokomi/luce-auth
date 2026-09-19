@@ -17,8 +17,12 @@ verification checks the user's current record profile in the same snapshot.
 Unversioned legacy salt/hash accounts and their sessions fail closed: no implicit
 weak fallback or automatic migration. Keep old stores backed up; a deliberate
 authenticated migration/reset workflow remains to be built, not deletion of data.
-Admission control and session lifecycle work are still required before real
-deployment. Full-cost record creation,
+Password creation and verification share a process-wide, nonblocking four-slot
+KDF admission gate. Exhaustion returns `password_records.busy` / `auth.busy`
+before allocating Argon2 working memory; deferred release covers failures. This
+bounds active Argon2 memory to 256 MiB plus overhead, not total process memory.
+It does not limit request queues, processes, or per-account attempts. Rate limits
+and session lifecycle work are still required before real deployment. Full-cost record creation,
 correct/wrong-password verification and malformed-record gates run in all six
 compiler modes and ASan/UBSan. See [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html).
 
@@ -49,7 +53,7 @@ assert(authority.verify(token.text_at()).text_at() == "alice")
 
 Default Argon2id costs are `64 MiB / 3 passes / 4 lanes`; only explicit fixture
 authorities use `32 KiB / 1 pass / 1 lane`. Experimental; not a reviewed identity
-provider. Applications still need bounded concurrent-KDF admission and rate limits.
+provider. Applications still need bounded request queues and rate limits.
 
 ```sh
 python3 tools/bootstrap.py

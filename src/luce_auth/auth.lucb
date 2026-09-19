@@ -9,6 +9,7 @@ pub let invalid = prism.invalid
 pub let missing = prism.missing
 pub let conflict = prism.conflict
 pub let closed = prism.closed
+pub let busy = passwords.busy
 
 func hex_digit(n: u8) -> u8:
     if n < 10:
@@ -212,7 +213,8 @@ pub struct Authority:
         let verifier = snap.value().get(path, "password_record") catch failure:
             error(invalid, "invalid user or password")
         defer verifier.release()
-        let accepted = passwords.verify(password.bytes, verifier.value().bytes(), allow_test = self.test_only) catch:
+        let accepted = passwords.verify(password.bytes, verifier.value().bytes(), allow_test = self.test_only) catch failure:
+            if failure.code == busy: error(busy, "password hashing capacity exhausted")
             error(invalid, "invalid user or password")
         if not accepted:
             error(invalid, "invalid user or password")

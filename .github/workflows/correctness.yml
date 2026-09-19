@@ -69,6 +69,12 @@ jobs:
         run: |
           set -o pipefail
           python3 tests/sanitize.py --base build/toolchain/luce-base 2>&1 | tee build/sanitize.log
+      - name: Full-cost password hashing contention
+        working-directory: luce-auth
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tests/admission_modes.py 2>&1 | tee build/admission-modes.log
       - name: Native macOS leak detection
         if: runner.os == 'macOS'
         working-directory: luce-auth
@@ -88,3 +94,4 @@ jobs:
             luce-auth/build/correctness.log
             luce-auth/build/sanitize.log
             luce-auth/build/heap.log
+            luce-auth/build/admission-modes.log

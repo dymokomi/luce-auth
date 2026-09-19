@@ -1,0 +1,47 @@
+## Real full-cost KDF contention, without scheduler-dependent rejection counts.
+import password_records as password
+import thread
+
+var ready: @u32
+var start: @u32
+var successes: @u32
+var busy: @u32
+var unexpected: @u32
+
+func worker(raw: void*?):
+    discard(raw)
+    var record: u8[64]
+    for i in 0..<record.length: record[i] = 173
+    discard(ready.add(1, .release))
+    while start.load(.acquire) == 0: thread.sleep(1)
+    password.create(b"disposable stress password", record) catch failure:
+        if failure.code == password.busy:
+            for byte in record: assert(byte == 173)
+            discard(busy.add(1, .relaxed))
+        else:
+            discard(unexpected.add(1, .relaxed))
+        return
+    let profile = password.profile_of(record) catch failure: trap(failure.message)
+    assert(profile == password.Profile.interactive)
+    discard(successes.add(1, .relaxed))
+
+pub func main(arguments: str[]) -> i32!:
+    discard(arguments)
+    var workers: thread.Handle[16]
+    for i in 0..<(usize)16:
+        workers[i] = thread.spawn(worker, none, name = "kdf-stress") catch failure:
+            start.store(1, .release)
+            for j in 0..<i: try workers[j].join()
+            error(failure.code, failure.message)
+    while ready.load(.acquire) != 16: thread.sleep(1)
+    start.store(1, .release)
+    for i in 0..<(usize)16: try workers[i].join()
+    assert(successes.load(.acquire) > 0)
+    assert(successes.load(.acquire) + busy.load(.acquire) == 16)
+    assert(unexpected.load(.acquire) == 0)
+    # All permits must have returned, including after contended calls.
+    var record: u8[64]
+    try password.create(b"after contention", record)
+    assert(try password.verify(b"after contention", record))
+    print("PASS real full-cost KDF contention, unchanged busy output and post-contention reuse")
+    return 0
