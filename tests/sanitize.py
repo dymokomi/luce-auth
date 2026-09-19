@@ -27,7 +27,7 @@ def main():
         subprocess.run([str(arg) for arg in command], cwd=ROOT, env=env,
                        check=True, timeout=600)
 
-    for name in ('check', 'invite_atomic', 'bootstrap_race', 'password'):
+    for name in ('check', 'invite_atomic', 'bootstrap_race', 'password', 'password_storage'):
         generated = output / f'{name}.c'
         run([args.base.resolve(), 'build', ROOT / 'tests' / f'{name}.lucb',
              '--emit=c', '-o', generated])
@@ -38,6 +38,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='luce-auth-sanitize-') as temporary:
         run([output / 'password', 'production'])
         scratch = Path(temporary)
+        run([output / 'password_storage', scratch / 'production.db', scratch / 'test-profile.db'])
         run([output / 'check', scratch / 'auth.db', scratch / 'attach.db'])
         run([output / 'invite_atomic', scratch / 'invite.db'])
         run([output / 'bootstrap_race', scratch / 'race.db'])

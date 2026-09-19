@@ -3,6 +3,7 @@ import interop
 import memory
 import prism
 import crypto_native
+import luce_auth.password as passwords
 
 pub let invalid = prism.invalid
 pub let missing = prism.missing
@@ -30,17 +31,6 @@ func valid_name(name: str) -> bool:
         if not ok:
             return false
     return true
-
-func argon_params() -> crypto_native.Argon2Parameters:
-    var parameters = crypto_native.Argon2Parameters()
-    parameters.memory_kib = 32
-    parameters.passes = 1
-    parameters.lanes = 1
-    return parameters
-
-func hash_password(password: str, salt: const u8[], out: u8[]) -> !:
-    var parameters = argon_params()
-    try crypto_native.argon2id(password.bytes, salt, out, parameters)
 
 func random_bytes(count: usize, out: u8[]) -> !:
     var secret = try crypto_native.random_secret(count)
@@ -85,11 +75,12 @@ pub struct Authority:
     var borrowed: prism.Store*?
     var owns: bool
     var alive: bool
+    var test_only: bool
 
     pub func init():
         return
 
-    pub static func open(path: str, token: str) -> interop.Reference[Authority]!:
+    pub static func open(path: str, token: str, test_only: bool = false) -> interop.Reference[Authority]!:
         if token.length == 0:
             error(invalid, "auth store token is required")
         let store = try prism.Store.open(path, token = token)
@@ -100,6 +91,7 @@ pub struct Authority:
         native.borrowed = none
         native.owns = true
         native.alive = true
+        native.test_only = test_only
         native.ensure_dirs() catch failure:
             native.close()
             free(native) in memory.heap
@@ -107,11 +99,12 @@ pub struct Authority:
         # adopt consumes/disposes native even when its allocation fails.
         return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
 
-    pub static func attach(store: prism.Store*) -> interop.Reference[Authority]!:
+    pub static func attach(store: prism.Store*, test_only: bool = false) -> interop.Reference[Authority]!:
         let native = try new Authority() in memory.heap
         native.borrowed = store
         native.owns = false
         native.alive = true
+        native.test_only = test_only
         native.ensure_dirs() catch failure:
             native.close()
             free(native) in memory.heap
@@ -175,10 +168,9 @@ pub struct Authority:
         var path_buf: u8[48]
         let n = try user_path(name, path_buf)
         let path = (str)path_buf[..<n]
-        var salt: u8[16]
-        try random_bytes(16, salt)
-        var hashed: u8[32]
-        try hash_password(password, salt, hashed)
+        var record: u8[64]
+        defer crypto_native.wipe(record)
+        try passwords.create(password.bytes, record, passwords.Profile.test_only if self.test_only else passwords.Profile.interactive)
         let store = try self.engine()
         let tx = try store.begin()
         defer tx.release()
@@ -202,17 +194,14 @@ pub struct Authority:
                 error(invalid, "invitation is not valid")
             try tx.value().remove(invitation)
         try tx.value().add(path, "file")
-        let salt_value = try prism.Value.array(prism.DType.uint8, [16], salt)
-        defer salt_value.release()
-        let hash_value = try prism.Value.array(prism.DType.uint8, [32], hashed)
-        defer hash_value.release()
-        try tx.value().set(path, "salt", salt_value)
-        try tx.value().set(path, "hash", hash_value)
+        let verifier = try prism.Value.array(prism.DType.uint8, [64], record)
+        defer verifier.release()
+        try tx.value().set(path, "password_record", verifier)
         discard(try tx.value().commit(wait_ms = 1000))
         discard(try store.bake(wait_ms = 1000))
 
     pub func login(name: str, password: str) -> interop.Reference[prism.Value]!:
-        if not valid_name(name) or password.length == 0:
+        if not valid_name(name) or password.length == 0 or password.length > 1024:
             error(invalid, "invalid user or password")
         var path_buf: u8[48]
         let n = try user_path(name, path_buf)
@@ -220,19 +209,12 @@ pub struct Authority:
         let store = try self.engine()
         let snap = try store.snapshot()
         defer snap.release()
-        let salt_value = snap.value().get(path, "salt") catch failure:
+        let verifier = snap.value().get(path, "password_record") catch failure:
             error(invalid, "invalid user or password")
-        defer salt_value.release()
-        let hash_value = snap.value().get(path, "hash") catch failure:
+        defer verifier.release()
+        let accepted = passwords.verify(password.bytes, verifier.value().bytes(), allow_test = self.test_only) catch:
             error(invalid, "invalid user or password")
-        defer hash_value.release()
-        let salt_view = salt_value.value()
-        let hash_view = hash_value.value()
-        let salt = salt_view.bytes()
-        let expected = hash_view.bytes()
-        var hashed: u8[32]
-        try hash_password(password, salt, hashed)
-        if not crypto_native.equal(hashed, expected):
+        if not accepted:
             error(invalid, "invalid user or password")
         var raw: u8[16]
         try random_bytes(16, raw)
@@ -261,7 +243,18 @@ pub struct Authority:
         let store = try self.engine()
         let snap = try store.snapshot()
         defer snap.release()
-        return try snap.value().get(path, "name")
+        let who = try snap.value().get(path, "name")
+        errdefer who.release()
+        let name = try who.value().text_at()
+        if not valid_name(name): error(invalid, "invalid session principal")
+        var user_buffer: u8[48]
+        let user_size = try user_path(name, user_buffer)
+        let verifier = snap.value().get((str)user_buffer[..<user_size], "password_record") catch:
+            error(invalid, "session password profile is unavailable")
+        defer verifier.release()
+        discard(passwords.profile_of(verifier.value().bytes(), allow_test = self.test_only) catch:
+            error(invalid, "session password profile is disallowed"))
+        return who
 
     pub func revoke(token: str) -> !:
         if token.length == 0:

@@ -34,11 +34,13 @@ def main():
         output.mkdir(parents=True, exist_ok=True)
         run([args.base.resolve(), "build", ROOT / "tests/password.lucb", *flags, "-o", output / "password"])
         run([output / "password", "production"])
+        run([args.base.resolve(), "build", ROOT / "tests/password_storage.lucb", *flags, "-o", output / "password-storage"])
         run([args.base.resolve(), "build", ROOT / "tests/check.lucb", *flags, "-o", output / "auth"])
         run([args.base.resolve(), "build", ROOT / "tests/invite_atomic.lucb", *flags, "-o", output / "invite-atomic"])
         run([args.base.resolve(), "build", ROOT / "tests/bootstrap_race.lucb", *flags, "-o", output / "bootstrap-race"])
         run([args.luce.resolve(), "build", ROOT / "tests/facade.luc", *flags, "-o", output / "facade"])
         with tempfile.TemporaryDirectory(prefix="luce-auth-") as tmp:
+            run([output / "password-storage", Path(tmp) / "production.db", Path(tmp) / "test-profile.db"])
             run([output / "auth", Path(tmp) / "auth.db", Path(tmp) / "attach.db"])
             run([output / "invite-atomic", Path(tmp) / "invite.db"])
             for attempt in range(8):

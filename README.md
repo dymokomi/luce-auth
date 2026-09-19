@@ -10,10 +10,15 @@ Only exact supported cost profiles are accepted before hashing; unknown versions
 lengths, or costs fail. The separate 32 KiB test profile requires explicit creation
 selection and `allow_test=true` verification; default verification rejects it.
 
-This record API is **not yet integrated into Authority storage**. Existing
-Authority password hashing still uses its test-only legacy profile; do not use
-real account credentials yet. Storage migration, profile enforcement, admission
-control and session lifecycle work are still required. Full-cost record creation,
+Authority now persists `password_record` and uses the interactive profile by
+default in both `open` and `attach`. Tests may explicitly pass `test_only=true`;
+default login and session verification reject test-profile records. Session
+verification checks the user's current record profile in the same snapshot.
+Unversioned legacy salt/hash accounts and their sessions fail closed: no implicit
+weak fallback or automatic migration. Keep old stores backed up; a deliberate
+authenticated migration/reset workflow remains to be built, not deletion of data.
+Admission control and session lifecycle work are still required before real
+deployment. Full-cost record creation,
 correct/wrong-password verification and malformed-record gates run in all six
 compiler modes and ASan/UBSan. See [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html).
 
@@ -42,9 +47,9 @@ assert(authority.verify(token.text_at()).text_at() == "alice")
 - `login` / `verify` / `revoke` — bearer session tokens.
 - `Authority.attach(store)` — borrow an open `prism.Store` (same flock).
 
-Argon2id costs in this slice are `32 KiB / 1 pass / 1 lane` so tests stay fast.
-Raise them before any real deployment. Experimental; not a reviewed identity
-provider.
+Default Argon2id costs are `64 MiB / 3 passes / 4 lanes`; only explicit fixture
+authorities use `32 KiB / 1 pass / 1 lane`. Experimental; not a reviewed identity
+provider. Applications still need bounded concurrent-KDF admission and rate limits.
 
 ```sh
 python3 tools/bootstrap.py

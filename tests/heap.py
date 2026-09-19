@@ -31,7 +31,7 @@ for name in ['canary-c', 'canary-native']:
     result.check_returncode()
     assert 'PASS ' in result.stdout, 'heap instrumentation canary did not complete'
     assert '0 leaks for 0 total leaked bytes' in result.stdout, result.stdout
-for name in ['check', 'invite_atomic', 'bootstrap_race']:
+for name in ['check', 'invite_atomic', 'bootstrap_race', 'password_storage']:
     binary = out / name
     subprocess.run([str(args.base.resolve()), 'build', str(ROOT / 'tests' / f'{name}.lucb'),
                     '--native', '-o', str(binary)], env=env, cwd=ROOT, check=True, timeout=600)
@@ -42,6 +42,7 @@ for name in ['check', 'invite_atomic', 'bootstrap_race']:
         with tempfile.TemporaryDirectory(prefix='auth-heap-') as temporary:
             paths = [str(Path(temporary) / 'auth.db')]
             if name == 'check': paths.append(str(Path(temporary) / 'attach.db'))
+            if name == 'password_storage': paths.append(str(Path(temporary) / 'test-profile.db'))
             prefix = ['/usr/bin/leaks', '--quiet', '--noContent', '--atExit', '--'] if instrumented else []
             print(f'HEAP FIXTURE {name} instrumented={instrumented}', flush=True)
             result = heap_process.run([*prefix, str(binary), *paths], env=env)

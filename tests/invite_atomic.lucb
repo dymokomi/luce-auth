@@ -4,7 +4,7 @@ import prism
 
 pub func main(arguments: str[]) -> i32!:
     assert(arguments.length == 2)
-    let authority = try auth.Authority.open(arguments[1], "test-secret")
+    let authority = try auth.Authority.open(arguments[1], "test-secret", test_only = true)
     defer authority.release()
     try authority.value().bootstrap("alice", "test-password")
     let invitation = try authority.value().invite()
@@ -18,7 +18,7 @@ pub func main(arguments: str[]) -> i32!:
     let original = try authority.value().login("alice", "test-password")
     defer original.release()
     authority.value().close()
-    let reopened = try auth.Authority.open(arguments[1], "test-secret")
+    let reopened = try auth.Authority.open(arguments[1], "test-secret", test_only = true)
     defer reopened.release()
     let preserved = try reopened.value().login("alice", "test-password")
     defer preserved.release()
@@ -35,7 +35,7 @@ pub func main(arguments: str[]) -> i32!:
     defer name.release()
     assert(try name.value().text_at() == "bob")
     reopened.value().close()
-    let final_store = try auth.Authority.open(arguments[1], "test-secret")
+    let final_store = try auth.Authority.open(arguments[1], "test-secret", test_only = true)
     defer final_store.release()
     var reused = false
     final_store.value().accept(code, "carol", "test-password") catch failure:

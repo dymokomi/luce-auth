@@ -4,7 +4,7 @@ import prism
 
 pub func main(arguments: str[]) -> i32!:
     assert(arguments.length == 3)
-    let authority = try auth.Authority.open(arguments[1], "secret")
+    let authority = try auth.Authority.open(arguments[1], "secret", test_only = true)
     defer authority.release()
     try authority.value().bootstrap("alice", "correct horse")
     var again = false
@@ -50,12 +50,12 @@ pub func main(arguments: str[]) -> i32!:
     assert(gone)
     let store = try prism.Store.open(arguments[2], token = "secret")
     defer store.release()
-    let attached = try auth.Authority.attach(store.value())
+    let attached = try auth.Authority.attach(store.value(), test_only = true)
     defer attached.release()
     let before = try store.value().snapshot()
     defer before.release()
     let revision = try before.value().revision()
-    let another = try auth.Authority.attach(store.value())
+    let another = try auth.Authority.attach(store.value(), test_only = true)
     defer another.release()
     let after = try store.value().snapshot()
     defer after.release()
