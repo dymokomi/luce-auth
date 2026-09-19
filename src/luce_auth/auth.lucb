@@ -129,15 +129,12 @@ pub struct Authority:
         let store = try self.engine()
         let tx = try store.begin()
         defer tx.release()
-        tx.value().add("/users", "directory") catch failure:
-            if failure.code != conflict:
-                error(failure.code, failure.message)
-        tx.value().add("/invites", "directory") catch failure:
-            if failure.code != conflict:
-                error(failure.code, failure.message)
-        tx.value().add("/sessions", "directory") catch failure:
-            if failure.code != conflict:
-                error(failure.code, failure.message)
+        var changed = false
+        for path in ["/users", "/invites", "/sessions"]:
+            if not try tx.value().contains(path):
+                try tx.value().add(path, "directory")
+                changed = true
+        if not changed: return
         discard(try tx.value().commit())
         discard(try store.bake())
 
