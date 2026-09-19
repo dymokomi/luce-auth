@@ -1,0 +1,9 @@
+from auth import Authority
+
+pub func main(arguments: list[str]) -> int!:
+    let authority = Authority.open(arguments[0], "secret")
+    authority.bootstrap("alice", "password")
+    let token = authority.login("alice", "password")
+    assert(authority.verify(token.text_at()).text_at() == "alice")
+    print("PASS Luce auth facade")
+    return 0

@@ -2,8 +2,9 @@
 name = "luce_auth"
 source = "src"
 
+[dependencies]
+luce_prism = "../luce-prism"
+luce_crypto = "../luce-crypto"
+
 [exports]
 auth = "luce_auth.auth"
-
-[dependencies]
-luce_crypto = "../luce-crypto"

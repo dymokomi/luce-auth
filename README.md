@@ -1,15 +1,34 @@
 # luce-auth
 
-Native Luce Base invitation records and password vault wrapping.
-MIT OR Apache-2.0. LID1 invites are single-use encodings; vaults wrap identity
-material with Argon2id and XChaCha20-Poly1305. Tokens are stored as SHA-256
-digests of the secret, never the secret.
+Users, one-use invitations and session tokens on a [luce-prism](../luce-prism)
+store. Passwords are Argon2id via [luce-crypto](../luce-crypto). Dual-licensed
+MIT OR Apache-2.0.
 
-Experimental. Not a complete account service, recovery flow or reviewed
-credential store. Do not use with real invitations or passwords.
+```toml
+[dependencies]
+luce_auth = "../luce-auth"
+```
+
+```luce
+from auth import Authority
+
+let authority = Authority.open(path, "secret")
+authority.bootstrap("alice", "password")
+let invite = authority.invite()
+authority.accept(invite.text_at(), "bob", "bob-pass")
+let token = authority.login("alice", "password")
+assert(authority.verify(token.text_at()).text_at() == "alice")
+```
+
+- `bootstrap` — first user only.
+- `invite` / `accept` — one-use codes; a second accept fails.
+- `login` / `verify` / `revoke` — bearer session tokens.
+- `Authority.attach(store)` — borrow an open `prism.Store` (same flock).
+
+Argon2id costs in this slice are `32 KiB / 1 pass / 1 lane` so tests stay fast.
+Raise them before any real deployment. Experimental; not a reviewed identity
+provider.
 
 ```sh
-python3 tools/bootstrap.py
-python3 tests/run.py
-python3 tests/sanitize.py
+python3 tests/run.py --base ../luce-base/build/luce-base --luce ../luce/build/luce
 ```

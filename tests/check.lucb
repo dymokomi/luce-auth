@@ -1,0 +1,75 @@
+import files
+import interop
+import auth
+import prism
+
+func dir() -> str:
+    return "/tmp/luce-auth-test"
+
+func db() -> str:
+    return "/tmp/luce-auth-test/root.db"
+
+pub func main(arguments: str[]) -> i32!:
+    discard(arguments)
+    files.delete_path(dir(), true) catch failure:
+        discard(failure)
+    try files.make_directory(dir())
+    let authority = try auth.Authority.open(db(), "secret")
+    defer authority.release()
+    try authority.value().bootstrap("alice", "correct horse")
+    var again = false
+    authority.value().bootstrap("bob", "x") catch failure:
+        assert(failure.code == prism.conflict)
+        again = true
+    assert(again)
+    let token_value = try authority.value().login("alice", "correct horse")
+    defer token_value.release()
+    let token = try token_value.value().text_at()
+    let who = try authority.value().verify(token)
+    defer who.release()
+    assert(try who.value().text_at() == "alice")
+    var bad = false
+    let wrong: interop.Reference[prism.Value]? = authority.value().login("alice", "wrong") catch failure:
+        assert(failure.code == prism.invalid)
+        bad = true
+        recover none
+    if let extra = wrong:
+        extra.release()
+        assert(false)
+    assert(bad)
+    let invite_value = try authority.value().invite()
+    defer invite_value.release()
+    let code = try invite_value.value().text_at()
+    try authority.value().accept(code, "bob", "bob-pass")
+    var reused = false
+    authority.value().accept(code, "carol", "x") catch failure:
+        assert(failure.code == prism.invalid)
+        reused = true
+    assert(reused)
+    let bob = try authority.value().login("bob", "bob-pass")
+    defer bob.release()
+    try authority.value().revoke(try bob.value().text_at())
+    var gone = false
+    let missing: interop.Reference[prism.Value]? = authority.value().verify(try bob.value().text_at()) catch failure:
+        assert(failure.code == prism.missing)
+        gone = true
+        recover none
+    if let extra = missing:
+        extra.release()
+        assert(false)
+    assert(gone)
+    files.delete_path("/tmp/luce-auth-attach", true) catch failure:
+        discard(failure)
+    try files.make_directory("/tmp/luce-auth-attach")
+    let store = try prism.Store.open("/tmp/luce-auth-attach/root.db", token = "secret")
+    defer store.release()
+    let attached = try auth.Authority.attach(store.value())
+    defer attached.release()
+    try attached.value().bootstrap("carol", "carol-pass")
+    let carol = try attached.value().login("carol", "carol-pass")
+    defer carol.release()
+    let carol_name = try attached.value().verify(try carol.value().text_at())
+    defer carol_name.release()
+    assert(try carol_name.value().text_at() == "carol")
+    print("PASS luce-auth bootstrap, invite, login, revoke")
+    return 0

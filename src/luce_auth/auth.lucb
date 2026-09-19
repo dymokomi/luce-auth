@@ -1,27 +1,279 @@
-import luce_auth.records as records
-import luce_auth.vault as vault
+## Users, one-use invitations and session tokens on a Prism store.
+import interop
+import memory
+import prism
 import crypto_native
 
-pub let invalid = records.invalid
-pub let forged = vault.forged
-pub let production_memory_kib = vault.production_memory_kib
-pub let production_passes = vault.production_passes
-pub let production_lanes = vault.production_lanes
-pub type Invite = records.Invite
+pub let invalid = prism.invalid
+pub let missing = prism.missing
+pub let conflict = prism.conflict
+pub let closed = prism.closed
 
-pub func encode_invite(invite: Invite, out: u8[]) -> usize!:
-    return try records.encode_invite(invite, out)
+func hex_digit(n: u8) -> u8:
+    if n < 10:
+        return 48 + n
+    return 87 + n
 
-pub func decode_invite(data: const u8[]) -> Invite!:
-    return try records.decode_invite(data)
+func hex_encode(bytes: const u8[], out: u8[]) -> usize:
+    var i: usize = 0
+    while i < bytes.length:
+        out[i * 2] = hex_digit(bytes[i] >> 4)
+        out[i * 2 + 1] = hex_digit(bytes[i] & 15)
+        i += 1
+    return bytes.length * 2
 
-pub func wrap_vault(password: const u8[], salt: const u8[], nonce: const u8[], plaintext: const u8[],
-    ciphertext: u8[], tag: u8[], memory_kib: u32 = 8192, passes: u32 = 1, lanes: u32 = 1) -> !:
-    try vault.wrap(password, salt, nonce, plaintext, ciphertext, tag, memory_kib, passes, lanes)
+func valid_name(name: str) -> bool:
+    if name.length == 0 or name.length > 32:
+        return false
+    for byte in name.bytes:
+        let ok = (byte >= 'a' and byte <= 'z') or (byte >= '0' and byte <= '9') or byte == '_'
+        if not ok:
+            return false
+    return true
 
-pub func unwrap_vault(password: const u8[], salt: const u8[], nonce: const u8[], ciphertext: const u8[],
-    tag: const u8[], plaintext: u8[], memory_kib: u32 = 8192, passes: u32 = 1, lanes: u32 = 1) -> !:
-    try vault.unwrap(password, salt, nonce, ciphertext, tag, plaintext, memory_kib, passes, lanes)
+func argon_params() -> crypto_native.Argon2Parameters:
+    var parameters = crypto_native.Argon2Parameters()
+    parameters.memory_kib = 32
+    parameters.passes = 1
+    parameters.lanes = 1
+    return parameters
 
-pub func token_digest(secret: const u8[], output: u8[]) -> usize!:
-    return try crypto_native.digest(secret, output, "sha256")
+func hash_password(password: str, salt: const u8[], out: u8[]) -> !:
+    var parameters = argon_params()
+    try crypto_native.argon2id(password.bytes, salt, out, parameters)
+
+func random_bytes(count: usize, out: u8[]) -> !:
+    var secret = try crypto_native.random_secret(count)
+    defer secret.close()
+    let bytes = try secret.bytes()
+    var i: usize = 0
+    while i < count:
+        out[i] = bytes[i]
+        i += 1
+
+func user_path(name: str, out: u8[]) -> usize!:
+    let prefix = b"/users/"
+    if prefix.length + name.length > out.length:
+        error(invalid, "auth path is too long")
+    var i: usize = 0
+    while i < prefix.length:
+        out[i] = prefix[i]
+        i += 1
+    var j: usize = 0
+    while j < name.length:
+        out[i] = name.bytes[j]
+        i += 1
+        j += 1
+    return i
+
+func join_prefix(prefix: const u8[], name: str, out: u8[]) -> usize!:
+    if prefix.length + name.length > out.length:
+        error(invalid, "auth path is too long")
+    var i: usize = 0
+    while i < prefix.length:
+        out[i] = prefix[i]
+        i += 1
+    var j: usize = 0
+    while j < name.length:
+        out[i] = name.bytes[j]
+        i += 1
+        j += 1
+    return i
+
+pub struct Authority:
+    var store: interop.Reference[prism.Store]
+    var borrowed: prism.Store*?
+    var owns: bool
+    var alive: bool
+
+    pub func init():
+        return
+
+    pub static func open(path: str, token: str) -> interop.Reference[Authority]!:
+        if token.length == 0:
+            error(invalid, "auth store token is required")
+        let native = try new Authority() in memory.heap
+        errdefer native.close()
+        native.store = try prism.Store.open(path, token = token)
+        native.borrowed = none
+        native.owns = true
+        native.alive = true
+        try native.ensure_dirs()
+        return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
+
+    pub static func attach(store: prism.Store*) -> interop.Reference[Authority]!:
+        let native = try new Authority() in memory.heap
+        errdefer native.close()
+        native.borrowed = store
+        native.owns = false
+        native.alive = true
+        try native.ensure_dirs()
+        return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
+
+    func engine() -> prism.Store*!:
+        if not self.alive:
+            error(closed, "authority is closed")
+        if self.owns:
+            return self.store.value()
+        return self.borrowed else error(closed, "authority is closed")
+
+    func ensure_dirs() -> !:
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        tx.value().add("/users", "directory") catch failure:
+            if failure.code != conflict:
+                error(failure.code, failure.message)
+        tx.value().add("/invites", "directory") catch failure:
+            if failure.code != conflict:
+                error(failure.code, failure.message)
+        tx.value().add("/sessions", "directory") catch failure:
+            if failure.code != conflict:
+                error(failure.code, failure.message)
+        discard(try tx.value().commit())
+        discard(try store.bake())
+
+    pub func bootstrap(name: str, password: str) -> !:
+        if not valid_name(name) or password.length == 0:
+            error(invalid, "invalid user or password")
+        let store = try self.engine()
+        let snap = try store.snapshot()
+        defer snap.release()
+        let kids = try snap.value().children("/users")
+        defer kids.release()
+        if kids.value().count() != 0:
+            error(conflict, "authority already has users")
+        try self.put_user(name, password)
+
+    pub func invite() -> interop.Reference[prism.Value]!:
+        var raw: u8[16]
+        try random_bytes(16, raw)
+        var code: u8[32]
+        discard(hex_encode(raw, code))
+        let text = (str)code
+        var path_buf: u8[48]
+        let n = try join_prefix(b"/invites/", text, path_buf)
+        let path = (str)path_buf[..<n]
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        try tx.value().add(path, "file")
+        let flag = try prism.Value.text("open")
+        defer flag.release()
+        try tx.value().set(path, "state", flag)
+        discard(try tx.value().commit())
+        discard(try store.bake())
+        return try prism.Value.text(text)
+
+    pub func accept(code: str, name: str, password: str) -> !:
+        if code.length == 0 or not valid_name(name) or password.length == 0:
+            error(invalid, "invalid invitation, user or password")
+        var path_buf: u8[48]
+        let n = try join_prefix(b"/invites/", code, path_buf)
+        let invite = (str)path_buf[..<n]
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        tx.value().get(invite, "state") catch failure:
+            error(invalid, "invitation is not valid")
+        try tx.value().remove(invite)
+        discard(try tx.value().commit())
+        discard(try store.bake())
+        try self.put_user(name, password)
+
+    func put_user(name: str, password: str) -> !:
+        var path_buf: u8[48]
+        let n = try user_path(name, path_buf)
+        let path = (str)path_buf[..<n]
+        var salt: u8[16]
+        try random_bytes(16, salt)
+        var hashed: u8[32]
+        try hash_password(password, salt, hashed)
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        tx.value().add(path, "file") catch failure:
+            error(conflict, "user already exists")
+        let salt_value = try prism.Value.array(prism.DType.uint8, [16], salt)
+        defer salt_value.release()
+        let hash_value = try prism.Value.array(prism.DType.uint8, [32], hashed)
+        defer hash_value.release()
+        try tx.value().set(path, "salt", salt_value)
+        try tx.value().set(path, "hash", hash_value)
+        discard(try tx.value().commit())
+        discard(try store.bake())
+
+    pub func login(name: str, password: str) -> interop.Reference[prism.Value]!:
+        if not valid_name(name) or password.length == 0:
+            error(invalid, "invalid user or password")
+        var path_buf: u8[48]
+        let n = try user_path(name, path_buf)
+        let path = (str)path_buf[..<n]
+        let store = try self.engine()
+        let snap = try store.snapshot()
+        defer snap.release()
+        let salt_value = snap.value().get(path, "salt") catch failure:
+            error(invalid, "invalid user or password")
+        defer salt_value.release()
+        let hash_value = snap.value().get(path, "hash") catch failure:
+            error(invalid, "invalid user or password")
+        defer hash_value.release()
+        let salt_view = salt_value.value()
+        let hash_view = hash_value.value()
+        let salt = salt_view.bytes()
+        let expected = hash_view.bytes()
+        var hashed: u8[32]
+        try hash_password(password, salt, hashed)
+        if not crypto_native.equal(hashed, expected):
+            error(invalid, "invalid user or password")
+        var raw: u8[16]
+        try random_bytes(16, raw)
+        var token: u8[32]
+        discard(hex_encode(raw, token))
+        let text = (str)token
+        var session_path: u8[48]
+        let sn = try join_prefix(b"/sessions/", text, session_path)
+        let spath = (str)session_path[..<sn]
+        let tx = try store.begin()
+        defer tx.release()
+        try tx.value().add(spath, "file")
+        let who = try prism.Value.text(name)
+        defer who.release()
+        try tx.value().set(spath, "name", who)
+        discard(try tx.value().commit())
+        discard(try store.bake())
+        return try prism.Value.text(text)
+
+    pub func verify(token: str) -> interop.Reference[prism.Value]!:
+        if token.length == 0:
+            error(invalid, "session token is required")
+        var session_path: u8[48]
+        let n = try join_prefix(b"/sessions/", token, session_path)
+        let path = (str)session_path[..<n]
+        let store = try self.engine()
+        let snap = try store.snapshot()
+        defer snap.release()
+        return try snap.value().get(path, "name")
+
+    pub func revoke(token: str) -> !:
+        if token.length == 0:
+            error(invalid, "session token is required")
+        var session_path: u8[48]
+        let n = try join_prefix(b"/sessions/", token, session_path)
+        let path = (str)session_path[..<n]
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        try tx.value().remove(path)
+        discard(try tx.value().commit())
+        discard(try store.bake())
+
+    pub mutating func close():
+        if not self.alive:
+            return
+        self.alive = false
+        if self.owns:
+            self.store.release()
+        self.borrowed = none
+
+pub let authority_type = interop.Type[Authority]("Prism authority", Authority.close, closeable = true)
