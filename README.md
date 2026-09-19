@@ -54,7 +54,12 @@ On macOS, `python3 tests/heap.py` requires fixture completion and a zero-leak
 report, with each ordinary child exit checked separately on a fresh store. Tiny
 C and native Luce Base canaries distinguish host instrumentation failures from
 authentication/runtime failures. Timeouts remain failures: the runner records
-only its own process group's states and bounded macOS stack samples, then kills
-and reaps that test group. `python3 tests/test_heap_process.py` verifies status
+only its own process group's states and bounded macOS stack samples, then cleans
+up that test group. Output uses regular files, not pipe EOF: macOS 15's leaks tool
+can exit after reporting while its instrumented child remains stopped in
+libLeaksAtExit holding output handles. On every tool exit the harness cleans up
+remaining group members and preserves the actual tool status; completion/zero-leak
+assertions and the separate uninstrumented child check remain mandatory.
+`python3 tests/test_heap_process.py` verifies status
 preservation and descendant cleanup even after the immediate parent has exited.
 The C canary is a test oracle, never part of the library implementation.

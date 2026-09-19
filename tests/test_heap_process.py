@@ -19,9 +19,28 @@ class ProcessTests(unittest.TestCase):
         script = ('import subprocess, sys; '
                   'p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
                   'print(p.pid, flush=True)')
+        result = heap_process.run([sys.executable, '-c', script], timeout=5, diagnostics=False)
+        self.assertEqual(result.returncode, 0)
+        self.assert_stopped(int(result.stdout.strip()))
+
+    def test_real_timeout_remains_failure(self):
+        script = ('import subprocess, sys, time; '
+                  'p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+                  'print(p.pid, flush=True); time.sleep(60)')
         with self.assertRaises(subprocess.TimeoutExpired) as caught:
             heap_process.run([sys.executable, '-c', script], timeout=1, diagnostics=False)
-        child = int(caught.exception.output.strip())
+        self.assert_stopped(int(caught.exception.output.strip()))
+
+    def test_stopped_instrumented_child_does_not_mask_tool_exit(self):
+        script = ('import os, subprocess, sys; '
+                  'p = subprocess.Popen([sys.executable, "-c", '
+                  '"import os, signal; os.kill(os.getpid(), signal.SIGSTOP)"]); '
+                  'os.waitpid(p.pid, os.WUNTRACED); print(p.pid, flush=True)')
+        result = heap_process.run([sys.executable, '-c', script], timeout=5, diagnostics=False)
+        self.assertEqual(result.returncode, 0)
+        self.assert_stopped(int(result.stdout.strip()))
+
+    def assert_stopped(self, child):
         deadline = time.monotonic() + 5
         while True:
             result = subprocess.run(['ps', '-p', str(child), '-o', 'stat='],

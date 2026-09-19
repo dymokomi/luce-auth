@@ -3,6 +3,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 
 
 def diagnose(group):
@@ -28,25 +29,34 @@ def diagnose(group):
 
 
 def run(command, *, env=None, timeout=120, diagnostics=True):
-    """Like run(capture_output=True), with descendant cleanup on timeout."""
+    """Wait for actual tool exit, not EOF on pipes held by instrumented children.
+
+    macOS 15 leaks can finish its report and leave its child stopped in
+    libLeaksAtExit. Regular-file capture avoids mistaking that inherited pipe
+    for a still-running tool. Reap the tool and clean up its own group on every
+    outcome; callers still verify tool status, fixture completion and leak report.
+    """
     command = list(map(str, command))
-    with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          text=True, start_new_session=True) as process:
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+    with tempfile.TemporaryFile(mode='w+') as output, tempfile.TemporaryFile(mode='w+') as errors:
+        with subprocess.Popen(command, env=env, stdout=output, stderr=errors,
+                              start_new_session=True) as process:
+            timed_out = False
             try:
-                if diagnostics:
-                    diagnose(process.pid)
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                if diagnostics: diagnose(process.pid)
             finally:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                stdout, stderr = process.communicate(timeout=5)
-            # Preserve captured evidence and remain a failed gate; never retry or
-            # treat an instrumentation timeout as proof of zero leaks.
-            print(stdout, end='', flush=True)
-            print(stderr, end='', file=sys.stderr, flush=True)
-            raise subprocess.TimeoutExpired(command, timeout, stdout, stderr) from None
-        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                process.wait(timeout=5)
+            output.seek(0)
+            errors.seek(0)
+            stdout, stderr = output.read(), errors.read()
+            if timed_out:
+                print(stdout, end='', flush=True)
+                print(stderr, end='', file=sys.stderr, flush=True)
+                raise subprocess.TimeoutExpired(command, timeout, stdout, stderr) from None
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
