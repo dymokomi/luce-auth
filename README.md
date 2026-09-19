@@ -1,5 +1,22 @@
 # luce-auth
 
+The new native `password_records` export provides a versioned 64-byte `LAP1`
+record: magic, little-endian memory/passes/lanes, random 16-byte salt, and 32-byte
+Argon2id output. Its default `interactive` profile is 65536 KiB / 3 passes / 4
+lanes, using four native workers (RFC 9106's second recommended option).
+`create` leaves output unchanged on failure; `verify` wipes temporary derived
+bytes and uses constant-time comparison. Passwords are bounded to 1–1024 bytes.
+Only exact supported cost profiles are accepted before hashing; unknown versions,
+lengths, or costs fail. The separate 32 KiB test profile requires explicit creation
+selection and `allow_test=true` verification; default verification rejects it.
+
+This record API is **not yet integrated into Authority storage**. Existing
+Authority password hashing still uses its test-only legacy profile; do not use
+real account credentials yet. Storage migration, profile enforcement, admission
+control and session lifecycle work are still required. Full-cost record creation,
+correct/wrong-password verification and malformed-record gates run in all six
+compiler modes and ASan/UBSan. See [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html).
+
 Users, one-use invitations and session tokens on a [luce-prism](../luce-prism)
 store. Passwords are Argon2id via [luce-crypto](../luce-crypto). Dual-licensed
 MIT OR Apache-2.0.

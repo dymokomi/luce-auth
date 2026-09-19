@@ -32,6 +32,8 @@ def main():
         print(f"MODE {mode}", flush=True)
         output = ROOT / "build" / mode
         output.mkdir(parents=True, exist_ok=True)
+        run([args.base.resolve(), "build", ROOT / "tests/password.lucb", *flags, "-o", output / "password"])
+        run([output / "password", "production"])
         run([args.base.resolve(), "build", ROOT / "tests/check.lucb", *flags, "-o", output / "auth"])
         run([args.base.resolve(), "build", ROOT / "tests/invite_atomic.lucb", *flags, "-o", output / "invite-atomic"])
         run([args.base.resolve(), "build", ROOT / "tests/bootstrap_race.lucb", *flags, "-o", output / "bootstrap-race"])

@@ -5,3 +5,4 @@ source = "."
 [dependencies]
 luce_auth = ".."
 luce_prism = "../../luce-prism"
+luce_crypto = "../../luce-crypto"

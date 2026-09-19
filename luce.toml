@@ -8,3 +8,4 @@ luce_crypto = "../luce-crypto"
 
 [exports]
 auth = "luce_auth.auth"
+password_records = "luce_auth.password"
