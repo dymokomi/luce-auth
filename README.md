@@ -17,10 +17,23 @@ Registry configuration must supply the canonical expected origin, not accept an
 arbitrary claimant-selected one. The proof demonstrates key possession for this
 context, not account ownership by itself.
 
-Challenge generation, bounded storage, expiry, one-use transactional consumption,
-authenticated key enrollment/rotation/recovery and HTTP/CLI integration remain
-unfinished. Replaying an identical proof for the identical inputs will still
-verify cryptographically; the server must prevent that. These are not package
+`Authority.key_challenge(session, origin)` authenticates a live session and stores
+one random32-byte outstanding challenge per account, replacing any older one.
+`Authority.enroll_key(session, origin, public_key, proof)` checks the live session,
+stored origin, five-minute challenge lifetime and possession proof. First-key
+publication and challenge consumption commit atomically, with a same-session-field
+write to conflict with concurrent revocation. Concurrent enrollment contenders
+write the same key/consumption fields, so only one can commit. A bound account
+cannot issue a new challenge or replace its key through these APIs. Failed proofs
+do not consume challenges or publish staged writes. A one-second bounded writer
+wait is used for commit/bake. Storage failures after commit can still leave a
+published result; inspect state before retrying.
+
+HTTP/CLI key enrollment, authenticated rotation/recovery, issuance rate limits and
+durable challenge handling across severe clock rollback remain unfinished.
+Origins must be supplied from trusted registry configuration. The host wall clock
+must be trustworthy. Replaying identical proof inputs still verifies at the raw
+cryptographic layer; the Authority enforces one-use enrollment. These are not package
 release signatures and cannot substitute for release verification. No new
 external cryptographic review is claimed.
 

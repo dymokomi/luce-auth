@@ -31,7 +31,7 @@ for name in ['canary-c', 'canary-native']:
     result.check_returncode()
     assert 'PASS ' in result.stdout, 'heap instrumentation canary did not complete'
     assert '0 leaks for 0 total leaked bytes' in result.stdout, result.stdout
-for name in ['check', 'invite_atomic', 'bootstrap_race', 'password_storage', 'password', 'admission_stress', 'sessions', 'vault', 'account_keys']:
+for name in ['check', 'invite_atomic', 'bootstrap_race', 'password_storage', 'password', 'admission_stress', 'sessions', 'vault', 'account_keys', 'enrollment']:
     binary = out / name
     subprocess.run([str(args.base.resolve()), 'build', str(ROOT / 'tests' / f'{name}.lucb'),
                     '--native', '-o', str(binary)], env=env, cwd=ROOT, check=True, timeout=600)
