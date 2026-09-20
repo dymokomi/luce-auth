@@ -1,6 +1,17 @@
 import auth
 import prism
 import interop
+import crypto_native as crypto
+
+func stored_session(token: str, output: u8[]) -> str!:
+    var digest: u8[32]
+    discard(try crypto.digest(token.bytes, digest))
+    let digits = b"0123456789abcdef"
+    for i in 0..<(usize)10: output[i] = b"/sessions/"[i]
+    for i in 0..<(usize)32:
+        output[10 + i * 2] = digits[(usize)(digest[i] >> 4)]
+        output[11 + i * 2] = digits[(usize)(digest[i] & 15)]
+    return (str)output[..<74]
 
 func denied(authority: auth.Authority*, token: str):
     var rejected = false
@@ -38,10 +49,13 @@ func expire(path: str, token: str) -> !:
     let after = try store.value().snapshot()
     defer after.release()
     assert(try after.value().revision() == revision)
-    var buffer: u8[42]
-    for i in 0..<(usize)10: buffer[i] = b"/sessions/"[i]
-    for i in 0..<(usize)32: buffer[10 + i] = token.bytes[i]
-    let session = (str)buffer
+    var buffer: u8[80]
+    let session = try stored_session(token, buffer)
+    var raw_buffer: u8[42]
+    for i in 0..<(usize)10: raw_buffer[i] = b"/sessions/"[i]
+    for i in 0..<(usize)32: raw_buffer[10 + i] = token.bytes[i]
+    assert(not try before.value().contains((str)raw_buffer))
+    assert(try before.value().contains(session))
     let bad_tx = try store.value().begin()
     defer bad_tx.release()
     let malformed = try prism.Value.text("not a timestamp")
@@ -57,11 +71,16 @@ func expire(path: str, token: str) -> !:
     defer deadline.release()
     try tx.value().set(session, "issued_at", issued)
     try tx.value().set(session, "expires_at", deadline)
-    # Old session with only a principal must never gain an implicit lifetime.
+    # Old raw-token storage and a digest-keyed session with only a principal
+    # must never gain an implicit lifetime.
     try tx.value().add("/sessions/ffffffffffffffffffffffffffffffff", "file")
     let name = try prism.Value.text("alice")
     defer name.release()
     try tx.value().set("/sessions/ffffffffffffffffffffffffffffffff", "name", name)
+    var legacy_buffer: u8[80]
+    let legacy = try stored_session("ffffffffffffffffffffffffffffffff", legacy_buffer)
+    try tx.value().add(legacy, "file")
+    try tx.value().set(legacy, "name", name)
     discard(try tx.value().commit())
     discard(try store.value().bake())
     denied(authority.value(), token)

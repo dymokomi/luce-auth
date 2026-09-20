@@ -155,6 +155,9 @@ provider. Applications still need bounded request queues and rate limits.
 Sessions have an absolute 24-hour lifetime, persisted as `issued_at` and
 `expires_at` in the same transaction as the principal. Verification fails at the
 expiry second, on invalid/missing timestamps, or when wall time precedes issuance.
+The raw bearer is never a Prism path or stored field: session records are keyed by
+the lowercase SHA-256 digest of the exact 32-character bearer text. Existing
+raw-token-keyed records are deliberately not migrated and fail closed.
 Legacy sessions without timestamps fail closed; logging in issues a new session.
 No sliding renewal is performed. Expired sessions can still be revoked, but are
 not automatically removed: session quotas, garbage collection, password-change
