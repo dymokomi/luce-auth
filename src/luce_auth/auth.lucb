@@ -267,6 +267,26 @@ pub struct Authority:
         defer snap.release()
         return try self.session_principal(snap.value(), token)
 
+    ## Session authorization and first-key read use one consistent snapshot.
+    ## None means authenticated but unbound; failures never mean absence.
+    pub func signing_key(token: str) -> interop.Reference[prism.Value]?!:
+        if not valid_token(token): error(invalid, "invalid session token")
+        let store = try self.engine()
+        let snap = try store.snapshot()
+        defer snap.release()
+        let who = try self.session_principal(snap.value(), token)
+        defer who.release()
+        var buffer: u8[48]
+        let size = try user_path(try who.value().text_at(), buffer)
+        let key = snap.value().get((str)buffer[..<size], "signing_key") catch failure:
+            if failure.code == missing: return none
+            error(failure.code, failure.message)
+        errdefer key.release()
+        if key.value().dtype() != prism.DType.uint8 or key.value().rank() != 1 or key.value().count() != 1952:
+            error(invalid, "invalid stored signing key")
+        if key.value().bytes().length != 1952: error(invalid, "invalid stored signing key")
+        return key
+
     func session_principal(snap: prism.Session*, token: str) -> interop.Reference[prism.Value]!:
         if not valid_token(token):
             error(invalid, "invalid session token")

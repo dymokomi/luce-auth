@@ -33,6 +33,7 @@ func setup(path: str) -> !:
     let session = try authority.value().login("alice", "fixture")
     defer session.release()
     let token = try session.value().text_at()
+    assert(try authority.value().signing_key(token) == none)
     let old = try authority.value().key_challenge(token, "https://pkg.luciaos.com")
     defer old.release()
     var seed: u8[32]
@@ -81,12 +82,27 @@ func setup(path: str) -> !:
     try first.join()
     try second.join()
     assert(success.load(.acquire) == 1 and rejected.load(.acquire) == 1)
+    let enrolled = (try authority.value().signing_key(token)) else trap("missing enrolled key")
+    defer enrolled.release()
+    assert(crypto.equal(enrolled.value().bytes(), public_key))
+    let invite = try authority.value().invite()
+    defer invite.release()
+    try authority.value().accept(try invite.value().text_at(), "bob", "fixture")
+    let other = try authority.value().login("bob", "fixture")
+    defer other.release()
+    assert(try authority.value().signing_key(try other.value().text_at()) == none)
     failed = false
     authority.value().enroll_key(token, "https://pkg.luciaos.com", public_key, signature) catch failure:
         assert(failure.code == auth.conflict)
         failed = true
     assert(failed)
     try authority.value().revoke(token)
+    failed = false
+    let denied = authority.value().signing_key(token) catch:
+        failed = true
+        recover none
+    if let value = denied: value.release()
+    assert(failed)
     failed = false
     let unused = authority.value().key_challenge(token, "https://pkg.luciaos.com") catch:
         failed = true
@@ -99,6 +115,14 @@ pub func main(arguments: str[]) -> i32!:
     try setup(arguments[1])
     let store = try prism.Store.open(arguments[1], token = "enrollment-fixture")
     defer store.release()
+    let authority = try auth.Authority.attach(store.value(), test_only = true)
+    defer authority.release()
+    let session = try authority.value().login("alice", "fixture")
+    defer session.release()
+    let token = try session.value().text_at()
+    let restored = (try authority.value().signing_key(token)) else trap("missing persisted key")
+    defer restored.release()
+    assert(crypto.equal(restored.value().bytes(), public_key))
     let snapshot = try store.value().snapshot()
     defer snapshot.release()
     let key = try snapshot.value().get("/users/alice", "signing_key")
@@ -107,5 +131,19 @@ pub func main(arguments: str[]) -> i32!:
     let used = try snapshot.value().get("/users/alice", "key_used")
     defer used.release()
     assert(try used.value().integer_at() == 1)
+    # Malformed stored data must fail closed, not report an unbound account.
+    let tx = try store.value().begin()
+    defer tx.release()
+    let malformed = try prism.Value.text("not a key")
+    defer malformed.release()
+    try tx.value().set("/users/alice", "signing_key", malformed)
+    discard(try tx.value().commit())
+    var failed = false
+    let corrupt = authority.value().signing_key(token) catch:
+        failed = true
+        recover none
+    if let value = corrupt: value.release()
+    assert(failed)
+    assert(crypto.equal(restored.value().bytes(), public_key))
     print("PASS atomic key enrollment, failed-proof no-write, expiry, replacement, concurrent consume and reopen")
     return 0

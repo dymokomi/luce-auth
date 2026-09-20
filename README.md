@@ -29,7 +29,16 @@ do not consume challenges or publish staged writes. A one-second bounded writer
 wait is used for commit/bake. Storage failures after commit can still leave a
 published result; inspect state before retrying.
 
-HTTP/CLI key enrollment, authenticated rotation/recovery, issuance rate limits and
+`Authority.signing_key(session)` authorizes the session and reads that account's
+key from the same snapshot. It returns an owning optional Value: none only for an
+authenticated account without a key; session, storage and malformed-key failures
+are errors. The stored key must be a rank-one uint8 array of exactly1952 bytes.
+Release a returned reference. Reads neither consume challenges nor mutate state.
+A concurrent revocation may occur after the read's snapshot, as with ordinary
+session verification. This is own-account reconciliation, not a public key
+directory or a release trust-distribution policy.
+
+Authenticated rotation/recovery, issuance rate limits and
 durable challenge handling across severe clock rollback remain unfinished.
 Origins must be supplied from trusted registry configuration. The host wall clock
 must be trustworthy. Replaying identical proof inputs still verifies at the raw
