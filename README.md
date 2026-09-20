@@ -19,14 +19,37 @@ entropy. Vault KDFs have their own four-slot nonblocking process-wide admission
 gate, separate from account-password hashing; these limits are not an aggregate
 application memory quota.
 
-This is a byte-envelope API, not yet a credential store or finished `luc` login.
-Atomic private file persistence, terminal password input, origin/account binding,
+This is a byte-envelope API, not yet a finished `luc` login.
+Terminal password input, origin/account binding,
 key recovery/rotation and CLI integration remain required. Encryption alone does
 not prevent rollback of an old valid vault. The API does not wipe caller-owned
 password/plaintext inputs. No independent LAV1 interoperability oracle or external
 security review is claimed; native crypto primitives have their own test suites.
 Vault roundtrip, tampering, truncation, randomness and boundary tests run in six
 compiler modes, ASan/UBSan, and the macOS heap gate.
+
+### Private vault files (Linux/macOS)
+
+`credential_files.create(path, password, plaintext, published)` encrypts before
+writing a private temporary sibling, synchronizes its contents, publishes with
+atomic no-replace semantics, then synchronizes the parent directory. Requested
+permissions are 0600, filtered by umask. Existing entries (including links and
+directories) are never overwritten. Optional `published` is reset on entry and
+becomes true after publication: a subsequent directory-sync/close error can mean
+the file exists but durability is uncertain. Temporary cleanup is best effort.
+
+`credential_files.open(path, password)` requires an owned private parent and
+an owned regular single-link file with mode0600 or0400. It atomically refuses a
+final symlink, opens nonblocking to avoid FIFO hangs, reads a bounded ciphertext
+and returns only authenticated plaintext in a Secret owner. A final symlink for
+the parent directory is also refused. The caller must provide a trusted, stable
+parent path and ancestors for the whole operation; this is not containment under
+hostile ancestor replacement. POSIX permissions do not prevent access by root or
+hostile code running as the same user. Parent creation, encrypted-file rollback
+protection, authenticated replacement/rotation and recovery remain caller/CLI work.
+No plaintext is written by these functions. File tests cover permissions, reopen,
+no-clobber, links/FIFO, malformed ciphertext and authentication failures in all six
+compiler modes and sanitizers; the heap gate exercises create/read.
 
 The new native `password_records` export provides a versioned 64-byte `LAP1`
 record: magic, little-endian memory/passes/lanes, random 16-byte salt, and 32-byte

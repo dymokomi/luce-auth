@@ -54,4 +54,18 @@ for name in ['check', 'invite_atomic', 'bootstrap_race', 'password_storage', 'pa
             assert 'PASS ' in result.stdout, 'auth fixture did not report completion'
             if instrumented:
                 assert '0 leaks for 0 total leaked bytes' in result.stdout, result.stdout
+vault_binary = out / 'vault_files'
+subprocess.run([str(args.base.resolve()), 'build', str(ROOT / 'tests/vault_files.lucb'),
+                '--native', '-o', str(vault_binary)], env=env, cwd=ROOT, check=True, timeout=600)
+for instrumented in (False, True):
+    with tempfile.TemporaryDirectory(prefix='vault-file-heap-') as temporary:
+        for action in ('create', 'read'):
+            prefix = ['/usr/bin/leaks', '--quiet', '--noContent', '--atExit', '--'] if instrumented else []
+            result = heap_process.run([*prefix, str(vault_binary), action, str(Path(temporary) / 'vault')], env=env)
+            print(result.stdout, end='', flush=True)
+            print(result.stderr, end='', file=sys.stderr, flush=True)
+            result.check_returncode()
+            assert 'PASS private vault file' in result.stdout
+            if instrumented:
+                assert '0 leaks for 0 total leaked bytes' in result.stdout, result.stdout
 print('PASS native auth and persistence heap cleanup')

@@ -1,0 +1,75 @@
+## POSIX private vault files. Caller must keep parent/ancestors trusted and stable.
+import luce_auth.vault as vault
+import crypto_native as crypto
+import files
+import paths
+import strings
+import platform
+import io
+import c
+
+extern func geteuid() -> u32
+
+func check_path(path: str) -> !:
+    if not (platform.macos or platform.linux): error(vault.invalid, "vault files require POSIX permissions")
+    if path.length == 0 or path.length > 4096: error(vault.invalid, "invalid vault path")
+    for byte in path.bytes:
+        if byte == 0: error(vault.invalid, "NUL in vault path")
+    let name = paths.base(path)
+    if name.length == 0 or name == "." or name == "..": error(vault.invalid, "invalid vault filename")
+
+func private_parent(parent: files.Directory*) -> !:
+    let info = try parent.metadata()
+    if info.kind != files.FileKind.directory or info.user != geteuid() or (info.permissions & 63) != 0:
+        error(vault.invalid, "vault directory must be private and owned by current user")
+
+## Publish a new 0600 encrypted file without replacing any existing entry.
+## published becomes true after rename; a later directory sync failure is possible.
+pub func create(path: str, password: const u8[], plaintext: const u8[], published: bool*? = none) -> !:
+    if let flag = published: *flag = false
+    try check_path(path)
+    let directory = try strings.copy(paths.directory(path))
+    defer strings.release(directory)
+    var parent = try files.Directory.open((c.str)directory, follow_symlinks = false)
+    defer parent.destroy()
+    try private_parent(&parent)
+    var parent_file = try files.File.open((c.str)directory)
+    defer parent_file.destroy()
+    var sealed = try vault.seal(password, plaintext)
+    defer sealed.close()
+    var temporary = try files.TemporaryFile.create((c.str)directory, permissions = 384)
+    defer temporary.destroy()
+    try io.write_all(&temporary, try sealed.bytes())
+    try temporary.sync()
+    try temporary.publish((c.str)path, replace = false)
+    if let flag = published: *flag = true
+    try parent_file.sync()
+    try parent_file.close()
+
+## Open the final entry without following symlinks or blocking on a FIFO.
+## Reject non-private, foreign-owned, hard-linked and non-regular files.
+pub func open(path: str, password: const u8[]) -> crypto.Secret!:
+    try check_path(path)
+    let directory = try strings.copy(paths.directory(path))
+    defer strings.release(directory)
+    let name = try strings.copy(paths.base(path))
+    defer strings.release(name)
+    var parent = try files.Directory.open((c.str)directory, follow_symlinks = false)
+    defer parent.destroy()
+    try private_parent(&parent)
+    var file = try parent.open_file((c.str)name, follow_symlinks = false, nonblocking = true)
+    defer file.destroy()
+    let info = try file.metadata()
+    if info.kind != files.FileKind.regular or info.user != geteuid() or info.links != 1:
+        error(vault.invalid, "vault is not an owned regular single-link file")
+    if info.permissions != 384 and info.permissions != 256:
+        error(vault.invalid, "vault permissions must be 0600 or 0400")
+    if info.size < 81 or info.size > 8272: error(vault.invalid, "vault file size outside bounds")
+    var wire: u8[8273]
+    var size: usize = 0
+    while size < wire.length:
+        let count = try file.read(wire[size..])
+        if count == 0: break
+        size += count
+    try file.close()
+    return try vault.open(password, wire[..<size])
