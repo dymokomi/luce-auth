@@ -13,6 +13,12 @@ pub let conflict = prism.conflict
 pub let closed = prism.closed
 pub let busy = passwords.busy
 pub let session_lifetime_seconds: i64 = 86400
+pub let credential_lifetime_min_seconds: i64 = 60
+pub let credential_lifetime_max_seconds: i64 = 7776000
+pub let scope_git_read = "git:read"
+pub let scope_git_write = "git:write"
+pub let scope_package_read = "package:read"
+pub let scope_package_publish = "package:publish"
 
 func valid_token(token: str) -> bool:
     if token.length != 32: return false
@@ -20,10 +26,40 @@ func valid_token(token: str) -> bool:
         if not ((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f')): return false
     return true
 
+func valid_credential_token(token: str) -> bool:
+    if token.length != 64: return false
+    for byte in token.bytes:
+        if not ((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f')): return false
+    return true
+
+func valid_scope(scope: str) -> bool:
+    return scope == scope_git_read or scope == scope_git_write or scope == scope_package_read or scope == scope_package_publish
+
+func scope_allows(granted: str, required: str) -> bool:
+    if granted == required: return true
+    if granted == scope_git_write and required == scope_git_read: return true
+    if granted == scope_package_publish and required == scope_package_read: return true
+    return false
+
+func valid_repository(name: str) -> bool:
+    if name.length == 0 or name.length > 64: return false
+    for i in 0..<name.length:
+        let byte = name.bytes[i]
+        let alnum = (byte >= 'a' and byte <= 'z') or (byte >= '0' and byte <= '9')
+        if not alnum and (i == 0 or (byte != '_' and byte != '-')): return false
+    return true
+
 ## Absolute one-day lifetime. Backward clock movement before issue fails closed.
 pub func session_window_valid(issued: i64, expires: i64, now: i64) -> bool:
     if issued <= 0 or issued > 9223372036854689407: return false
     if expires != issued + session_lifetime_seconds: return false
+    return now >= issued and now < expires
+
+## Scoped credentials have caller-selected, bounded absolute lifetimes.
+pub func credential_window_valid(issued: i64, expires: i64, now: i64) -> bool:
+    if issued <= 0 or expires <= issued: return false
+    let lifetime = expires - issued
+    if lifetime < credential_lifetime_min_seconds or lifetime > credential_lifetime_max_seconds: return false
     return now >= issued and now < expires
 
 func hex_digit(n: u8) -> u8:
@@ -96,6 +132,15 @@ func session_path(token: str, out: u8[]) -> usize!:
     discard(hex_encode(digest, encoded))
     return try join_prefix(b"/sessions/", (str)encoded, out)
 
+## Scoped credential secrets are also represented only by a SHA-256 storage key.
+func credential_path(token: str, out: u8[]) -> usize!:
+    if not valid_credential_token(token): error(invalid, "invalid credential token")
+    var digest: u8[32]
+    discard(try crypto_native.digest(token.bytes, digest))
+    var encoded: u8[64]
+    discard(hex_encode(digest, encoded))
+    return try join_prefix(b"/credentials/", (str)encoded, out)
+
 pub struct Authority:
     var store: interop.Reference[prism.Store]
     var borrowed: prism.Store*?
@@ -149,7 +194,7 @@ pub struct Authority:
         let tx = try store.begin()
         defer tx.release()
         var changed = false
-        for path in ["/users", "/invites", "/sessions"]:
+        for path in ["/users", "/invites", "/sessions", "/credentials"]:
             if not try tx.value().contains(path):
                 try tx.value().add(path, "directory")
                 changed = true
@@ -247,8 +292,10 @@ pub struct Authority:
         if issued <= 0 or issued > 9223372036854689407:
             error(invalid, "session clock is unavailable")
         var raw: u8[16]
+        defer crypto_native.wipe(raw)
         try random_bytes(16, raw)
         var token: u8[32]
+        defer crypto_native.wipe(token)
         discard(hex_encode(raw, token))
         let text = (str)token
         var session_buffer: u8[80]
@@ -276,6 +323,104 @@ pub struct Authority:
         let snap = try store.snapshot()
         defer snap.release()
         return try self.session_principal(snap.value(), token)
+
+    ## Mint a repository-bound credential from a live interactive session.
+    ## The returned 256-bit secret is shown once and is never stored verbatim.
+    pub func issue_credential(token: str, scope: str, repository: str, lifetime_seconds: i64) -> interop.Reference[prism.Value]!:
+        if not valid_token(token): error(invalid, "invalid session token")
+        if not valid_scope(scope) or not valid_repository(repository): error(invalid, "invalid credential scope")
+        if lifetime_seconds < credential_lifetime_min_seconds or lifetime_seconds > credential_lifetime_max_seconds:
+            error(invalid, "invalid credential lifetime")
+        let issued = time.unix()
+        if issued <= 0 or issued > 9223372036854775807 - lifetime_seconds:
+            error(invalid, "credential clock is unavailable")
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        let who = try self.enrollment_session(tx.value(), token)
+        defer who.release()
+        var raw: u8[32]
+        defer crypto_native.wipe(raw)
+        try random_bytes(32, raw)
+        var encoded: u8[64]
+        defer crypto_native.wipe(encoded)
+        discard(hex_encode(raw, encoded))
+        let text = (str)encoded
+        var path_buffer: u8[96]
+        let size = try credential_path(text, path_buffer)
+        let path = (str)path_buffer[..<size]
+        try tx.value().add(path, "file")
+        try tx.value().set(path, "name", who)
+        let scope_value = try prism.Value.text(scope)
+        defer scope_value.release()
+        try tx.value().set(path, "scope", scope_value)
+        let repository_value = try prism.Value.text(repository)
+        defer repository_value.release()
+        try tx.value().set(path, "repository", repository_value)
+        let created = try prism.Value.integer(issued)
+        defer created.release()
+        try tx.value().set(path, "issued_at", created)
+        let expiry = try prism.Value.integer(issued + lifetime_seconds)
+        defer expiry.release()
+        try tx.value().set(path, "expires_at", expiry)
+        discard(try tx.value().commit(wait_ms = 1000))
+        discard(try store.bake(wait_ms = 1000))
+        return try prism.Value.text(text)
+
+    ## Authorize one exact owner/repository/operation from a single snapshot.
+    pub func authorize_credential(token: str, required_scope: str, owner: str, repository: str) -> interop.Reference[prism.Value]!:
+        if not valid_credential_token(token) or not valid_scope(required_scope): error(invalid, "invalid credential")
+        if not valid_name(owner) or not valid_repository(repository): error(invalid, "invalid credential target")
+        var path_buffer: u8[96]
+        let size = try credential_path(token, path_buffer)
+        let path = (str)path_buffer[..<size]
+        let store = try self.engine()
+        let snap = try store.snapshot()
+        defer snap.release()
+        let who = try snap.value().get(path, "name")
+        errdefer who.release()
+        let granted = try snap.value().get(path, "scope")
+        defer granted.release()
+        let target = try snap.value().get(path, "repository")
+        defer target.release()
+        let issued = try snap.value().get(path, "issued_at")
+        defer issued.release()
+        let expires = try snap.value().get(path, "expires_at")
+        defer expires.release()
+        let principal = try who.value().text_at()
+        if not valid_name(principal) or principal != owner: error(invalid, "credential owner mismatch")
+        if try target.value().text_at() != repository: error(invalid, "credential repository mismatch")
+        if not scope_allows(try granted.value().text_at(), required_scope): error(invalid, "credential scope denied")
+        if issued.value().count() != 1 or expires.value().count() != 1: error(invalid, "invalid credential lifetime")
+        let created = issued.value().integer_at() catch: error(invalid, "invalid credential lifetime")
+        let deadline = expires.value().integer_at() catch: error(invalid, "invalid credential lifetime")
+        if not credential_window_valid(created, deadline, time.unix()): error(invalid, "expired credential")
+        var user_buffer: u8[48]
+        let user_size = try user_path(principal, user_buffer)
+        let verifier = snap.value().get((str)user_buffer[..<user_size], "password_record") catch:
+            error(invalid, "credential account is unavailable")
+        defer verifier.release()
+        discard(passwords.profile_of(verifier.value().bytes(), allow_test = self.test_only) catch:
+            error(invalid, "credential account profile is disallowed"))
+        return who
+
+    ## Revoke one credential owned by the authenticated session principal.
+    pub func revoke_credential(token: str, credential: str) -> !:
+        if not valid_token(token) or not valid_credential_token(credential): error(invalid, "invalid credential revocation")
+        var path_buffer: u8[96]
+        let size = try credential_path(credential, path_buffer)
+        let path = (str)path_buffer[..<size]
+        let store = try self.engine()
+        let tx = try store.begin()
+        defer tx.release()
+        let who = try self.enrollment_session(tx.value(), token)
+        defer who.release()
+        let stored = try tx.value().get(path, "name")
+        defer stored.release()
+        if try stored.value().text_at() != try who.value().text_at(): error(invalid, "credential owner mismatch")
+        try tx.value().remove(path)
+        discard(try tx.value().commit(wait_ms = 1000))
+        discard(try store.bake(wait_ms = 1000))
 
     ## Session authorization and first-key read use one consistent snapshot.
     ## None means authenticated but unbound; failures never mean absence.

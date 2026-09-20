@@ -146,6 +146,11 @@ assert(authority.verify(token.text_at()).text_at() == "alice")
 - `bootstrap` — first user only.
 - `invite` / `accept` — one-use codes; a second accept fails.
 - `login` / `verify` / `revoke` — bearer session tokens, exactly 32 lowercase hex characters.
+- `issue_credential` / `authorize_credential` / `revoke_credential` — independent
+  256-bit credentials bound to one repository, one bounded lifetime and one of
+  `git:read`, `git:write`, `package:read`, or `package:publish`. Write/publish
+  credentials include the corresponding read permission, but Git and package
+  scopes never imply one another.
 - `Authority.attach(store)` — borrow an open `prism.Store` (same flock).
 
 Default Argon2id costs are `64 MiB / 3 passes / 4 lanes`; only explicit fixture
@@ -165,6 +170,18 @@ revocation and protection against broader wall-clock rollback remain unfinished.
 The host clock must be trustworthy. Malformed tokens are rejected by the library
 before storage access, including revoke; HTTP header validation is not the only
 boundary.
+
+Scoped credentials are 64 lowercase hexadecimal characters and live for between
+one minute and 90 days. The raw secret is returned once and is never stored: its
+record is keyed by SHA-256 and contains only the principal, exact repository,
+scope, issue time and expiry. Issuance and owner-authorized revocation use a
+same-session-field transaction guard, so a concurrent session revoke conflicts
+instead of silently minting or revoking after logout. Logging out does not revoke
+device credentials; each one is independently revocable. Expiry, malformed
+records, deleted accounts, disallowed password profiles, cross-owner use,
+cross-repository use and scope escalation fail closed. Automatic expiry cleanup,
+credential listing, labels and account-wide emergency revocation remain future
+operational work.
 
 ```sh
 python3 tools/bootstrap.py
