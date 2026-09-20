@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Real full-cost KDF contention in six modes and ASan/UBSan."""
 import os
+import argparse
 from pathlib import Path
 import subprocess
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--fixture', choices=['admission_stress', 'vault'], default='admission_stress')
+args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
 base = ROOT / 'build/toolchain/luce-base'
-out = ROOT / 'build/admission-modes'
+out = ROOT / ('build/admission-modes' if args.fixture == 'admission_stress' else 'build/vault-modes')
 out.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ)
 env.setdefault('LUCE_STD', str(ROOT.parent / 'luce-base/src/std'))
@@ -16,7 +20,7 @@ def run(command):
     print('RUN', ' '.join(map(str, command)), flush=True)
     subprocess.run(list(map(str, command)), cwd=ROOT, env=env, check=True, timeout=600)
 
-source = ROOT / 'tests/admission_stress.lucb'
+source = ROOT / 'tests' / f'{args.fixture}.lucb'
 modes = [(f'native{i}', ['--native', '--opt', str(i)]) for i in range(4)]
 modes += [('c', ['--backend=c']), ('c-release', ['--backend=c', '--release'])]
 for name, flags in modes:
@@ -33,4 +37,4 @@ run([os.environ.get('CC', 'cc'), '-std=gnu11', '-O1', '-g', '-w',
 env['ASAN_OPTIONS'] = 'halt_on_error=1:abort_on_error=1'
 env['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
 run([binary])
-print('PASS KDF contention: six compiler modes and ASan/UBSan', flush=True)
+print(f'PASS {args.fixture}: six compiler modes and ASan/UBSan', flush=True)

@@ -75,6 +75,12 @@ jobs:
         run: |
           set -o pipefail
           python3 tests/admission_modes.py 2>&1 | tee build/admission-modes.log
+      - name: Password-protected credential vault
+        working-directory: luce-auth
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tests/admission_modes.py --fixture vault 2>&1 | tee build/vault-modes.log
       - name: Native macOS leak detection
         if: runner.os == 'macOS'
         working-directory: luce-auth
@@ -95,3 +101,4 @@ jobs:
             luce-auth/build/sanitize.log
             luce-auth/build/heap.log
             luce-auth/build/admission-modes.log
+            luce-auth/build/vault-modes.log

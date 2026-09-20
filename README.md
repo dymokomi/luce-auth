@@ -1,5 +1,33 @@
 # luce-auth
 
+## Native credential vault
+
+The `credential_vault` export wraps 1–8192 opaque credential bytes using native
+Argon2id (64 MiB, three passes, four lanes/workers) and XChaCha20-Poly1305.
+`seal(password, plaintext)` returns an owning encrypted `crypto_native.Secret`;
+`open(password, wire)` returns an owning plaintext Secret only after successful
+authentication. Close each returned owner exactly once; borrowed views must not
+outlive it. Derived keys and failed plaintext buffers are wiped. Passwords are
+1–1024 bytes. There is no low-cost test profile.
+
+LAV1 wire format: magic4, three LE32 KDF costs, LE32 plaintext length, four zero
+reserved bytes, random16-byte salt, random24-byte nonce, ciphertext, tag16. The
+entire 64-byte header is AEAD associated data. Argon2 associated data is the fixed
+ASCII domain `luce-auth/vault/LAV1`. Unknown versions/costs/flags, lengths outside
+bounds and trailing bytes are rejected before hashing. Each seal uses fresh OS
+entropy. Vault KDFs have their own four-slot nonblocking process-wide admission
+gate, separate from account-password hashing; these limits are not an aggregate
+application memory quota.
+
+This is a byte-envelope API, not yet a credential store or finished `luc` login.
+Atomic private file persistence, terminal password input, origin/account binding,
+key recovery/rotation and CLI integration remain required. Encryption alone does
+not prevent rollback of an old valid vault. The API does not wipe caller-owned
+password/plaintext inputs. No independent LAV1 interoperability oracle or external
+security review is claimed; native crypto primitives have their own test suites.
+Vault roundtrip, tampering, truncation, randomness and boundary tests run in six
+compiler modes, ASan/UBSan, and the macOS heap gate.
+
 The new native `password_records` export provides a versioned 64-byte `LAP1`
 record: magic, little-endian memory/passes/lanes, random 16-byte salt, and 32-byte
 Argon2id output. Its default `interactive` profile is 65536 KiB / 3 passes / 4

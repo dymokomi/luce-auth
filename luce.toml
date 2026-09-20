@@ -9,3 +9,4 @@ luce_crypto = "../luce-crypto"
 [exports]
 auth = "luce_auth.auth"
 password_records = "luce_auth.password"
+credential_vault = "luce_auth.vault"

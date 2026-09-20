@@ -1,0 +1,61 @@
+import credential_vault as vault
+import crypto_native as crypto
+
+func rejected(password: const u8[], wire: const u8[]):
+    var denied = false
+    var result = vault.open(password, wire) catch failure:
+        assert(failure.code == vault.invalid or failure.code == vault.forged)
+        denied = true
+        recover crypto.Secret()
+    defer result.close()
+    assert(denied)
+
+func reject_seal(password: const u8[], plaintext: const u8[]):
+    var denied = false
+    var result = vault.seal(password, plaintext) catch failure:
+        assert(failure.code == vault.invalid)
+        denied = true
+        recover crypto.Secret()
+    defer result.close()
+    assert(denied)
+
+pub func main(arguments: str[]) -> i32!:
+    discard(arguments)
+    let plaintext = b"disposable identity seed and registry token"
+    reject_seal(b"", plaintext)
+    reject_seal(b"fixture password", b"")
+    var oversized: u8[8193]
+    reject_seal(b"fixture password", oversized)
+    reject_seal(oversized[..<1025], plaintext)
+    var sealed = try vault.seal(b"fixture password", plaintext)
+    defer sealed.close()
+    let wire = try sealed.writable()
+    assert(try vault.plaintext_size(wire) == plaintext.length)
+    var opened = try vault.open(b"fixture password", wire)
+    defer opened.close()
+    assert(crypto.equal(try opened.bytes(), plaintext))
+    rejected(b"wrong password", wire)
+    rejected(b"", wire)
+    for i in 0..<(usize)24:
+        wire[i] ^= 128
+        rejected(b"fixture password", wire)
+        wire[i] ^= 128
+    for n in 0..<wire.length: rejected(b"fixture password", wire[..<n])
+    for at in [(usize)24, (usize)40, (usize)64, wire.length - 1]:
+        wire[at] ^= 1
+        rejected(b"fixture password", wire)
+        wire[at] ^= 1
+    var second = try vault.seal(b"fixture password", plaintext)
+    defer second.close()
+    let other = try second.bytes()
+    assert(not crypto.equal(wire[24..<40], other[24..<40]))
+    assert(not crypto.equal(wire[40..<64], other[40..<64]))
+    var large: u8[8192]
+    for i in 0..<large.length: large[i] = (u8)i
+    var maximum = try vault.seal(b"fixture password", large)
+    defer maximum.close()
+    var restored = try vault.open(b"fixture password", try maximum.bytes())
+    defer restored.close()
+    assert(crypto.equal(try restored.bytes(), large))
+    print("PASS native credential vault roundtrip, tampering, bounds, randomness and maximum payload")
+    return 0

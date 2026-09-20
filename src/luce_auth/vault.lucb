@@ -1,0 +1,80 @@
+## Password-wrapped bounded credential bytes. No filesystem or identity policy.
+import crypto_native as crypto
+import luce_auth.password as password_records
+
+pub let invalid = crypto.invalid
+pub let forged = crypto.forged
+pub let busy = password_records.busy
+pub let maximum_plaintext: usize = 8192
+pub let overhead: usize = 80
+var admission: password_records.Admission
+
+func put32(out: u8[], at: usize, value: u32):
+    for i in 0..<(usize)4: out[at + i] = (u8)(value >> (8 * i))
+
+func get32(wire: const u8[], at: usize) -> u32:
+    var value: u32 = 0
+    for i in 0..<(usize)4: value |= (u32)wire[at + i] << (8 * i)
+    return value
+
+func check_password(password: const u8[]) -> !:
+    if password.length == 0 or password.length > 1024: error(invalid, "vault password length outside bounds")
+
+func derive(password: const u8[], salt: const u8[], key: u8[]) -> !:
+    if not admission.try_acquire(): error(busy, "vault hashing capacity exhausted")
+    defer admission.release()
+    try crypto.argon2id(password, salt, key,
+        crypto.Argon2Parameters(memory_kib = 65536, passes = 3, lanes = 4),
+        associated = b"luce-auth/vault/LAV1", workers = 4)
+
+## LAV1: magic4, LE32 costs(memory/passes/lanes), LE32 payload size,
+## reserved zero4, salt16, nonce24, ciphertext, tag16. Header64 is AEAD AAD.
+## Parameters are fixed and checked before expensive work; no weak test profile.
+pub func plaintext_size(wire: const u8[]) -> usize!:
+    if wire.length < overhead + 1 or wire.length > overhead + maximum_plaintext:
+        error(invalid, "vault size outside bounds")
+    if (str)wire[..<4] != "LAV1" or get32(wire, 4) != 65536 or get32(wire, 8) != 3 or get32(wire, 12) != 4:
+        error(invalid, "unsupported vault version or KDF parameters")
+    if get32(wire, 20) != 0: error(invalid, "unsupported vault flags")
+    let size = (usize)get32(wire, 16)
+    if size == 0 or size > maximum_plaintext or wire.length != size + overhead:
+        error(invalid, "invalid vault payload length")
+    return size
+
+## Returns owning ciphertext bytes; caller closes the returned Secret.
+pub func seal(password: const u8[], plaintext: const u8[]) -> crypto.Secret!:
+    try check_password(password)
+    if plaintext.length == 0 or plaintext.length > maximum_plaintext:
+        error(invalid, "vault plaintext length outside bounds")
+    var zeros: u8[8272]
+    var result = try crypto.secret_from_bytes(zeros[..<plaintext.length + overhead])
+    errdefer result.close()
+    let wire = try result.writable()
+    for i in 0..<(usize)4: wire[i] = b"LAV1"[i]
+    put32(wire, 4, 65536)
+    put32(wire, 8, 3)
+    put32(wire, 12, 4)
+    put32(wire, 16, (u32)plaintext.length)
+    var entropy = try crypto.random_secret(40)
+    defer entropy.close()
+    let random = try entropy.bytes()
+    for i in 0..<(usize)40: wire[24 + i] = random[i]
+    var key: u8[32]
+    defer crypto.wipe(key)
+    try derive(password, wire[24..<40], key)
+    try crypto.aead_seal(key, wire[40..<64], wire[..<64], plaintext,
+        wire[64..<64 + plaintext.length], wire[64 + plaintext.length..])
+    return result
+
+## Authentication must succeed before any plaintext owner is returned.
+pub func open(password: const u8[], wire: const u8[]) -> crypto.Secret!:
+    try check_password(password)
+    let size = try plaintext_size(wire)
+    var key: u8[32]
+    defer crypto.wipe(key)
+    try derive(password, wire[24..<40], key)
+    var zeros: u8[8192]
+    var result = try crypto.secret_from_bytes(zeros[..<size])
+    errdefer result.close()
+    try crypto.aead_open(key, wire[40..<64], wire[..<64], wire[64..<64 + size], wire[64 + size..], try result.writable())
+    return result
