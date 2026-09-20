@@ -1,0 +1,68 @@
+## ML-DSA-65 possession proofs; challenge issuance/expiry/consumption is server policy.
+import crypto_native as crypto
+
+pub let invalid = crypto.invalid
+pub let public_key_size: usize = 1952
+pub let signature_size: usize = 3309
+
+pub func generate() -> crypto.Secret!:
+    return try crypto.random_secret(32)
+
+pub func public_key(seed: const u8[], output: u8[]) -> !:
+    if seed.length != 32 or output.length != public_key_size: error(invalid, "invalid account key buffers")
+    var pk: u8[1952]
+    var sk: u8[4032]
+    defer crypto.wipe(sk)
+    try crypto.mldsa_keygen(seed, pk, sk)
+    for i in 0..<pk.length: output[i] = pk[i]
+
+func transcript(origin: str, account: str, challenge: const u8[], output: u8[]) -> usize!:
+    if origin.length == 0 or origin.length > 255 or account.length == 0 or account.length > 32 or challenge.length != 32:
+        error(invalid, "invalid account proof context")
+    # Origin is exact caller-supplied registry identity, not a parsed/normalized URL.
+    for byte in origin.bytes:
+        if byte < 33 or byte > 126: error(invalid, "invalid registry identity")
+    for byte in account.bytes:
+        if not ((byte >= 'a' and byte <= 'z') or (byte >= '0' and byte <= '9') or byte == '_'):
+            error(invalid, "invalid account name")
+    let domain = b"luce-auth/account-possession/v1\0"
+    var size: usize = 0
+    for byte in domain:
+        output[size] = byte
+        size += 1
+    output[size] = (u8)origin.length
+    size += 1
+    for byte in origin.bytes:
+        output[size] = byte
+        size += 1
+    output[size] = (u8)account.length
+    size += 1
+    for byte in account.bytes:
+        output[size] = byte
+        size += 1
+    for byte in challenge:
+        output[size] = byte
+        size += 1
+    return size
+
+## Fresh randomized signature; output unchanged on any failure.
+pub func prove(seed: const u8[], origin: str, account: str, challenge: const u8[], output: u8[]) -> !:
+    if seed.length != 32 or output.length != signature_size: error(invalid, "invalid account proof buffers")
+    var message: u8[384]
+    let size = try transcript(origin, account, challenge, message)
+    var pk: u8[1952]
+    var sk: u8[4032]
+    defer crypto.wipe(sk)
+    try crypto.mldsa_keygen(seed, pk, sk)
+    var entropy = try crypto.random_secret(32)
+    defer entropy.close()
+    var signature: u8[3309]
+    try crypto.mldsa_sign(sk, message[..<size], try entropy.bytes(), signature)
+    for i in 0..<signature.length: output[i] = signature[i]
+
+pub func verify(key: const u8[], origin: str, account: str, challenge: const u8[], signature: const u8[]) -> bool!:
+    if key.length != public_key_size or signature.length != signature_size:
+        error(invalid, "invalid account verification buffers")
+    var message: u8[384]
+    let size = try transcript(origin, account, challenge, message)
+    return try crypto.mldsa_verify(key, message[..<size], signature)

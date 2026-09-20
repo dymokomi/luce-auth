@@ -1,5 +1,29 @@
 # luce-auth
 
+## Post-quantum account key proofs
+
+The `account_identity` export generates an owning random32-byte seed, derives a
+1952-byte ML-DSA-65 public key, and creates/verifies randomized3309-byte possession
+proofs. Store the seed only in an encrypted private vault; never send it to a
+registry. Caller-owned seed bytes remain the caller's responsibility to wipe;
+temporary expanded private keys are wiped internally. Output buffers are exact
+size and unchanged on failure.
+
+The signed message is ASCII `luce-auth/account-possession/v1` followed by NUL,
+one-byte origin length, exact origin bytes, one-byte account-name length, account
+bytes, and a32-byte challenge. Origins are1..255 printable non-space ASCII bytes;
+this layer does not parse or normalize URLs. Account names follow auth syntax.
+Registry configuration must supply the canonical expected origin, not accept an
+arbitrary claimant-selected one. The proof demonstrates key possession for this
+context, not account ownership by itself.
+
+Challenge generation, bounded storage, expiry, one-use transactional consumption,
+authenticated key enrollment/rotation/recovery and HTTP/CLI integration remain
+unfinished. Replaying an identical proof for the identical inputs will still
+verify cryptographically; the server must prevent that. These are not package
+release signatures and cannot substitute for release verification. No new
+external cryptographic review is claimed.
+
 ## Native credential vault
 
 The `credential_vault` export wraps 1–8192 opaque credential bytes using native

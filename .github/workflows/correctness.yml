@@ -87,6 +87,12 @@ jobs:
         run: |
           set -o pipefail
           python3 tests/admission_modes.py --fixture vault_files 2>&1 | tee build/vault-files-modes.log
+      - name: Account key possession proofs
+        working-directory: luce-auth
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tests/admission_modes.py --fixture account_keys 2>&1 | tee build/account-keys-modes.log
       - name: Native macOS leak detection
         if: runner.os == 'macOS'
         working-directory: luce-auth
@@ -109,3 +115,4 @@ jobs:
             luce-auth/build/admission-modes.log
             luce-auth/build/vault-modes.log
             luce-auth/build/vault-files-modes.log
+            luce-auth/build/account-keys-modes.log

@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--fixture', choices=['admission_stress', 'vault', 'vault_files'], default='admission_stress')
+parser.add_argument('--fixture', choices=['admission_stress', 'vault', 'vault_files', 'account_keys'], default='admission_stress')
 args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
 base = ROOT / 'build/toolchain/luce-base'
