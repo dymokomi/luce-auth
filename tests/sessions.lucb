@@ -1,0 +1,89 @@
+import auth
+import prism
+import interop
+
+func denied(authority: auth.Authority*, token: str):
+    var rejected = false
+    let who: interop.Reference[prism.Value]? = authority.verify(token) catch failure:
+        assert(failure.code == auth.invalid)
+        rejected = true
+        recover none
+    if let value = who: value.release()
+    assert(rejected)
+
+func create(path: str) -> interop.Reference[prism.Value]!:
+    let authority = try auth.Authority.open(path, "session-fixture", test_only = true)
+    defer authority.release()
+    try authority.value().bootstrap("alice", "fixture password")
+    return try authority.value().login("alice", "fixture password")
+
+func expire(path: str, token: str) -> !:
+    let store = try prism.Store.open(path, token = "session-fixture")
+    defer store.release()
+    let authority = try auth.Authority.attach(store.value(), test_only = true)
+    defer authority.release()
+    let who = try authority.value().verify(token)
+    defer who.release()
+    assert(try who.value().text_at() == "alice")
+    let before = try store.value().snapshot()
+    defer before.release()
+    let revision = try before.value().revision()
+    for bad in ["", "../users/alice", "../users/alice/", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "fffffffffffffffffffffffffffffff/", "fffffffffffffffffffffffffffffff", "fffffffffffffffffffffffffffffffff"]:
+        denied(authority.value(), bad)
+        var rejected = false
+        authority.value().revoke(bad) catch failure:
+            assert(failure.code == auth.invalid)
+            rejected = true
+        assert(rejected)
+    let after = try store.value().snapshot()
+    defer after.release()
+    assert(try after.value().revision() == revision)
+    var buffer: u8[42]
+    for i in 0..<(usize)10: buffer[i] = b"/sessions/"[i]
+    for i in 0..<(usize)32: buffer[10 + i] = token.bytes[i]
+    let session = (str)buffer
+    let bad_tx = try store.value().begin()
+    defer bad_tx.release()
+    let malformed = try prism.Value.text("not a timestamp")
+    defer malformed.release()
+    try bad_tx.value().set(session, "expires_at", malformed)
+    discard(try bad_tx.value().commit())
+    denied(authority.value(), token)
+    let tx = try store.value().begin()
+    defer tx.release()
+    let issued = try prism.Value.integer(1)
+    defer issued.release()
+    let deadline = try prism.Value.integer(86401)
+    defer deadline.release()
+    try tx.value().set(session, "issued_at", issued)
+    try tx.value().set(session, "expires_at", deadline)
+    # Old session with only a principal must never gain an implicit lifetime.
+    try tx.value().add("/sessions/ffffffffffffffffffffffffffffffff", "file")
+    let name = try prism.Value.text("alice")
+    defer name.release()
+    try tx.value().set("/sessions/ffffffffffffffffffffffffffffffff", "name", name)
+    discard(try tx.value().commit())
+    discard(try store.value().bake())
+    denied(authority.value(), token)
+    denied(authority.value(), "ffffffffffffffffffffffffffffffff")
+
+pub func main(arguments: str[]) -> i32!:
+    assert(arguments.length == 2)
+    assert(auth.session_window_valid(100, 86500, 100))
+    assert(auth.session_window_valid(100, 86500, 86499))
+    assert(not auth.session_window_valid(100, 86500, 86500))
+    assert(not auth.session_window_valid(100, 86500, 99))
+    assert(not auth.session_window_valid(0, 86400, 1))
+    assert(not auth.session_window_valid(100, 86501, 100))
+    assert(not auth.session_window_valid(9223372036854775807, 1, 1))
+    assert(auth.session_window_valid(9223372036854689407, 9223372036854775807, 9223372036854689407))
+    let token = try create(arguments[1])
+    defer token.release()
+    try expire(arguments[1], try token.value().text_at())
+    let reopened = try auth.Authority.open(arguments[1], "session-fixture", test_only = true)
+    defer reopened.release()
+    denied(reopened.value(), try token.value().text_at())
+    denied(reopened.value(), "ffffffffffffffffffffffffffffffff")
+    try reopened.value().revoke(try token.value().text_at())
+    print("PASS session lifetime boundaries, reopen, legacy rejection and malformed-token no-write")
+    return 0

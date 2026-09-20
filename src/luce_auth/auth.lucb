@@ -3,6 +3,7 @@ import interop
 import memory
 import prism
 import crypto_native
+import time
 import luce_auth.password as passwords
 
 pub let invalid = prism.invalid
@@ -10,6 +11,19 @@ pub let missing = prism.missing
 pub let conflict = prism.conflict
 pub let closed = prism.closed
 pub let busy = passwords.busy
+pub let session_lifetime_seconds: i64 = 86400
+
+func valid_token(token: str) -> bool:
+    if token.length != 32: return false
+    for byte in token.bytes:
+        if not ((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f')): return false
+    return true
+
+## Absolute one-day lifetime. Backward clock movement before issue fails closed.
+pub func session_window_valid(issued: i64, expires: i64, now: i64) -> bool:
+    if issued <= 0 or issued > 9223372036854689407: return false
+    if expires != issued + session_lifetime_seconds: return false
+    return now >= issued and now < expires
 
 func hex_digit(n: u8) -> u8:
     if n < 10:
@@ -218,6 +232,9 @@ pub struct Authority:
             error(invalid, "invalid user or password")
         if not accepted:
             error(invalid, "invalid user or password")
+        let issued = time.unix()
+        if issued <= 0 or issued > 9223372036854689407:
+            error(invalid, "session clock is unavailable")
         var raw: u8[16]
         try random_bytes(16, raw)
         var token: u8[32]
@@ -232,13 +249,19 @@ pub struct Authority:
         let who = try prism.Value.text(name)
         defer who.release()
         try tx.value().set(spath, "name", who)
+        let created = try prism.Value.integer(issued)
+        defer created.release()
+        let expires = try prism.Value.integer(issued + session_lifetime_seconds)
+        defer expires.release()
+        try tx.value().set(spath, "issued_at", created)
+        try tx.value().set(spath, "expires_at", expires)
         discard(try tx.value().commit())
         discard(try store.bake())
         return try prism.Value.text(text)
 
     pub func verify(token: str) -> interop.Reference[prism.Value]!:
-        if token.length == 0:
-            error(invalid, "session token is required")
+        if not valid_token(token):
+            error(invalid, "invalid session token")
         var session_path: u8[48]
         let n = try join_prefix(b"/sessions/", token, session_path)
         let path = (str)session_path[..<n]
@@ -247,6 +270,18 @@ pub struct Authority:
         defer snap.release()
         let who = try snap.value().get(path, "name")
         errdefer who.release()
+        let issued = snap.value().get(path, "issued_at") catch:
+            error(invalid, "session lifetime is unavailable")
+        defer issued.release()
+        let expires = snap.value().get(path, "expires_at") catch:
+            error(invalid, "session lifetime is unavailable")
+        defer expires.release()
+        if issued.value().count() != 1 or expires.value().count() != 1:
+            error(invalid, "invalid session lifetime")
+        let created = issued.value().integer_at() catch: error(invalid, "invalid session lifetime")
+        let deadline = expires.value().integer_at() catch: error(invalid, "invalid session lifetime")
+        if not session_window_valid(created, deadline, time.unix()):
+            error(invalid, "expired or invalid session lifetime")
         let name = try who.value().text_at()
         if not valid_name(name): error(invalid, "invalid session principal")
         var user_buffer: u8[48]
@@ -259,8 +294,8 @@ pub struct Authority:
         return who
 
     pub func revoke(token: str) -> !:
-        if token.length == 0:
-            error(invalid, "session token is required")
+        if not valid_token(token):
+            error(invalid, "invalid session token")
         var session_path: u8[48]
         let n = try join_prefix(b"/sessions/", token, session_path)
         let path = (str)session_path[..<n]
