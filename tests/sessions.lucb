@@ -88,14 +88,16 @@ func expire(path: str, token: str) -> !:
 
 pub func main(arguments: str[]) -> i32!:
     assert(arguments.length == 2)
-    assert(auth.session_window_valid(100, 86500, 100))
-    assert(auth.session_window_valid(100, 86500, 86499))
-    assert(not auth.session_window_valid(100, 86500, 86500))
-    assert(not auth.session_window_valid(100, 86500, 99))
-    assert(not auth.session_window_valid(0, 86400, 1))
-    assert(not auth.session_window_valid(100, 86501, 100))
+    let life = auth.session_lifetime_seconds
+    assert(life == 315360000)
+    assert(auth.session_window_valid(100, 100 + life, 100))
+    assert(auth.session_window_valid(100, 100 + life, 99 + life))
+    assert(not auth.session_window_valid(100, 100 + life, 100 + life))
+    assert(not auth.session_window_valid(100, 100 + life, 99))
+    assert(not auth.session_window_valid(0, life, 1))
+    assert(not auth.session_window_valid(100, 101 + life, 100))
     assert(not auth.session_window_valid(9223372036854775807, 1, 1))
-    assert(auth.session_window_valid(9223372036854689407, 9223372036854775807, 9223372036854689407))
+    assert(auth.session_window_valid(9223372036539415807, 9223372036854775807, 9223372036539415807))
     let token = try create(arguments[1])
     defer token.release()
     try expire(arguments[1], try token.value().text_at())

@@ -157,7 +157,7 @@ Default Argon2id costs are `64 MiB / 3 passes / 4 lanes`; only explicit fixture
 authorities use `32 KiB / 1 pass / 1 lane`. Experimental; not a reviewed identity
 provider. Applications still need bounded request queues and rate limits.
 
-Sessions have an absolute 24-hour lifetime, persisted as `issued_at` and
+Sessions have an absolute ten-year lifetime (in effect, until revoked), persisted as `issued_at` and
 `expires_at` in the same transaction as the principal. Verification fails at the
 expiry second, on invalid/missing timestamps, or when wall time precedes issuance.
 The raw bearer is never a Prism path or stored field: session records are keyed by

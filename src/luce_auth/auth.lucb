@@ -12,7 +12,8 @@ pub let missing = prism.missing
 pub let conflict = prism.conflict
 pub let closed = prism.closed
 pub let busy = passwords.busy
-pub let session_lifetime_seconds: i64 = 86400
+## Ten years: a session lasts until it is revoked, as gh and the AWS CLI keep theirs.
+pub let session_lifetime_seconds: i64 = 315360000
 pub let credential_lifetime_min_seconds: i64 = 60
 pub let credential_lifetime_max_seconds: i64 = 7776000
 pub let scope_git_read = "git:read"
@@ -49,9 +50,9 @@ func valid_repository(name: str) -> bool:
         if not alnum and (i == 0 or (byte != '_' and byte != '-')): return false
     return true
 
-## Absolute one-day lifetime. Backward clock movement before issue fails closed.
+## Absolute session lifetime. Backward clock movement before issue fails closed.
 pub func session_window_valid(issued: i64, expires: i64, now: i64) -> bool:
-    if issued <= 0 or issued > 9223372036854689407: return false
+    if issued <= 0 or issued > 9223372036539415807: return false
     if expires != issued + session_lifetime_seconds: return false
     return now >= issued and now < expires
 
