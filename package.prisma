@@ -1,0 +1,40 @@
+#prisma 4.0
+def package "luce-auth" {
+    str owner = "dymokomi"
+    str version = "0.1.0"
+    str language = "luce-base"
+    str description = "The account_identity export generates an owning random32-byte seed, derives a 1952-byte ML-DSA-65 public key, and creates/verifies randomized3309-byte possession proofs."
+    str readme = "README.md"
+
+    def export "auth" {
+        str module = "luce_auth.auth"
+    }
+
+    def export "password_records" {
+        str module = "luce_auth.password"
+    }
+
+    def export "credential_vault" {
+        str module = "luce_auth.vault"
+    }
+
+    def export "credential_files" {
+        str module = "luce_auth.vault_files"
+    }
+
+    def export "account_identity" {
+        str module = "luce_auth.account_keys"
+    }
+
+    def dependency "luce-prism" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-prism"
+    }
+
+    def dependency "luce-crypto" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-crypto"
+    }
+}
