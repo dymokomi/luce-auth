@@ -1,0 +1,13 @@
+#prisma 4.0
+def package "luce_auth_tests" {
+    str source = "."
+    def dependency "luce_auth" {
+        str path = ".."
+    }
+    def dependency "luce_prism" {
+        str path = "../../luce-prism"
+    }
+    def dependency "luce_crypto" {
+        str path = "../../luce-crypto"
+    }
+}
