@@ -5,7 +5,6 @@ import prism
 import crypto_native
 import time
 import luce_auth.password as passwords
-import luce_auth.account_keys as account_keys
 
 pub let invalid = prism.invalid
 pub let missing = prism.missing
@@ -423,26 +422,6 @@ pub struct Authority:
         discard(try tx.value().commit(wait_ms = 1000))
         discard(try store.bake(wait_ms = 1000))
 
-    ## Session authorization and first-key read use one consistent snapshot.
-    ## None means authenticated but unbound; failures never mean absence.
-    pub func signing_key(token: str) -> interop.Reference[prism.Value]?!:
-        if not valid_token(token): error(invalid, "invalid session token")
-        let store = try self.engine()
-        let snap = try store.snapshot()
-        defer snap.release()
-        let who = try self.session_principal(snap.value(), token)
-        defer who.release()
-        var buffer: u8[48]
-        let size = try user_path(try who.value().text_at(), buffer)
-        let key = snap.value().get((str)buffer[..<size], "signing_key") catch failure:
-            if failure.code == missing: return none
-            error(failure.code, failure.message)
-        errdefer key.release()
-        if key.value().dtype() != prism.DType.uint8 or key.value().rank() != 1 or key.value().count() != 1952:
-            error(invalid, "invalid stored signing key")
-        if key.value().bytes().length != 1952: error(invalid, "invalid stored signing key")
-        return key
-
     func session_principal(snap: prism.Session*, token: str) -> interop.Reference[prism.Value]!:
         if not valid_token(token):
             error(invalid, "invalid session token")
@@ -490,79 +469,6 @@ pub struct Authority:
         if let key = existing:
             key.release()
             error(conflict, "account already has a signing key")
-
-    ## Origin must come from trusted registry configuration. One outstanding nonce/account.
-    pub func key_challenge(token: str, origin: str) -> interop.Reference[prism.Value]!:
-        if not valid_token(token): error(invalid, "invalid session token")
-        if origin.length == 0 or origin.length > 255: error(invalid, "invalid registry identity")
-        for byte in origin.bytes:
-            if byte < 33 or byte > 126: error(invalid, "invalid registry identity")
-        let issued = time.unix()
-        if issued <= 0: error(invalid, "challenge clock unavailable")
-        let store = try self.engine()
-        let tx = try store.begin()
-        defer tx.release()
-        let who = try self.enrollment_session(tx.value(), token)
-        defer who.release()
-        var buffer: u8[48]
-        let size = try user_path(try who.value().text_at(), buffer)
-        let path = (str)buffer[..<size]
-        try self.require_unbound(tx.value(), path)
-        var nonce: u8[32]
-        try random_bytes(32, nonce)
-        let challenge = try prism.Value.array(prism.DType.uint8, [32], nonce)
-        errdefer challenge.release()
-        let registry = try prism.Value.text(origin)
-        defer registry.release()
-        let stamp = try prism.Value.integer(issued)
-        defer stamp.release()
-        let unused = try prism.Value.integer(0)
-        defer unused.release()
-        try tx.value().set(path, "key_challenge", challenge)
-        try tx.value().set(path, "key_origin", registry)
-        try tx.value().set(path, "key_issued", stamp)
-        try tx.value().set(path, "key_used", unused)
-        discard(try tx.value().commit(wait_ms = 1000))
-        discard(try store.bake(wait_ms = 1000))
-        return challenge
-
-    ## First enrollment only; key write and nonce consumption share one transaction.
-    pub func enroll_key(token: str, origin: str, key: const u8[], proof: const u8[]) -> !:
-        if not valid_token(token): error(invalid, "invalid session token")
-        let store = try self.engine()
-        let tx = try store.begin()
-        defer tx.release()
-        let who = try self.enrollment_session(tx.value(), token)
-        defer who.release()
-        let name = try who.value().text_at()
-        var buffer: u8[48]
-        let size = try user_path(name, buffer)
-        let path = (str)buffer[..<size]
-        try self.require_unbound(tx.value(), path)
-        let challenge = try tx.value().get(path, "key_challenge")
-        defer challenge.release()
-        let registry = try tx.value().get(path, "key_origin")
-        defer registry.release()
-        let stamp = try tx.value().get(path, "key_issued")
-        defer stamp.release()
-        let used = try tx.value().get(path, "key_used")
-        defer used.release()
-        if stamp.value().count() != 1 or used.value().count() != 1: error(invalid, "invalid challenge record")
-        let issued = try stamp.value().integer_at()
-        let now = time.unix()
-        if issued <= 0 or now < issued or now - issued >= 300 or try used.value().integer_at() != 0:
-            error(invalid, "expired or consumed challenge")
-        if try registry.value().text_at() != origin: error(invalid, "challenge origin mismatch")
-        if not try account_keys.verify(key, origin, name, challenge.value().bytes(), proof):
-            error(invalid, "invalid account key proof")
-        let value = try prism.Value.array(prism.DType.uint8, [1952], key)
-        defer value.release()
-        let consumed = try prism.Value.integer(1)
-        defer consumed.release()
-        try tx.value().set(path, "signing_key", value)
-        try tx.value().set(path, "key_used", consumed)
-        discard(try tx.value().commit(wait_ms = 1000))
-        discard(try store.bake(wait_ms = 1000))
 
     pub func revoke(token: str) -> !:
         if not valid_token(token):

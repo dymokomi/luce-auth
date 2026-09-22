@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--fixture', choices=['admission_stress', 'vault', 'vault_files', 'account_keys'], default='admission_stress')
+parser.add_argument('--fixture', choices=['admission_stress'], default='admission_stress')
 args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
 base = ROOT / 'build/toolchain/luce-base'
@@ -22,7 +22,7 @@ def run(command):
     subprocess.run(list(map(str, command)), cwd=ROOT, env=env, check=True, timeout=600)
 
 def fixture(binary):
-    run([sys.executable, ROOT / 'tests/vault_files.py', binary] if args.fixture == 'vault_files' else [binary])
+    run([binary])
 
 source = ROOT / 'tests' / f'{args.fixture}.lucb'
 modes = [(f'native{i}', ['--native', '--opt', str(i)]) for i in range(4)]

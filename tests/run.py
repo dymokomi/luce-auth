@@ -37,7 +37,6 @@ def main():
         run([args.base.resolve(), "build", ROOT / "tests/password_storage.lucb", *flags, "-o", output / "password-storage"])
         run([args.base.resolve(), "build", ROOT / "tests/sessions.lucb", *flags, "-o", output / "sessions"])
         run([args.base.resolve(), "build", ROOT / "tests/credentials.lucb", *flags, "-o", output / "credentials"])
-        run([args.base.resolve(), "build", ROOT / "tests/enrollment.lucb", *flags, "-o", output / "enrollment"])
         run([args.base.resolve(), "build", ROOT / "tests/check.lucb", *flags, "-o", output / "auth"])
         run([args.base.resolve(), "build", ROOT / "tests/invite_atomic.lucb", *flags, "-o", output / "invite-atomic"])
         run([args.base.resolve(), "build", ROOT / "tests/bootstrap_race.lucb", *flags, "-o", output / "bootstrap-race"])
@@ -45,8 +44,6 @@ def main():
         with tempfile.TemporaryDirectory(prefix="luce-auth-") as tmp:
             run([output / "sessions", Path(tmp) / "sessions.db"])
             run([output / "credentials", Path(tmp) / "credentials.db"])
-            for attempt in range(4):
-                run([output / "enrollment", Path(tmp) / f"enrollment-{attempt}.db"])
             run([output / "password-storage", Path(tmp) / "production.db", Path(tmp) / "test-profile.db"])
             run([output / "auth", Path(tmp) / "auth.db", Path(tmp) / "attach.db"])
             run([output / "invite-atomic", Path(tmp) / "invite.db"])

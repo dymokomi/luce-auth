@@ -7,9 +7,6 @@ source = "src"
 [exports]
 auth = "luce_auth.auth"
 password_records = "luce_auth.password"
-credential_vault = "luce_auth.vault"
-credential_files = "luce_auth.vault_files"
-account_identity = "luce_auth.account_keys"
 
 [dependencies]
 luce_crypto = "../luce-crypto"

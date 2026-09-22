@@ -27,7 +27,7 @@ def main():
         subprocess.run([str(arg) for arg in command], cwd=ROOT, env=env,
                        check=True, timeout=600)
 
-    for name in ('check', 'invite_atomic', 'bootstrap_race', 'password', 'password_storage', 'sessions', 'credentials', 'enrollment'):
+    for name in ('check', 'invite_atomic', 'bootstrap_race', 'password', 'password_storage', 'sessions', 'credentials'):
         generated = output / f'{name}.c'
         run([args.base.resolve(), 'build', ROOT / 'tests' / f'{name}.lucb',
              '--emit=c', '-o', generated])
@@ -40,7 +40,6 @@ def main():
         scratch = Path(temporary)
         run([output / 'sessions', scratch / 'sessions.db'])
         run([output / 'credentials', scratch / 'credentials.db'])
-        run([output / 'enrollment', scratch / 'enrollment.db'])
         run([output / 'password_storage', scratch / 'production.db', scratch / 'test-profile.db'])
         run([output / 'check', scratch / 'auth.db', scratch / 'attach.db'])
         run([output / 'invite_atomic', scratch / 'invite.db'])
