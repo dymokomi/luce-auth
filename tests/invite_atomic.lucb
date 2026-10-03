@@ -1,6 +1,6 @@
 ## A rejected registration must not consume its one-use invitation.
-import luce_auth.auth
-import luce_prism.prism
+from luce_auth import auth
+from luce_prism import prism
 
 pub func main(arguments: str[]) -> i32!:
     assert(arguments.length == 2)

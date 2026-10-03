@@ -1,8 +1,8 @@
 ## Users, one-use invitations and session tokens on a Prism store.
 import interop
 import memory
-import luce_prism.prism
-import luce_crypto.native as crypto_native
+from luce_prism import prism
+from luce_crypto import native as crypto_native
 import time
 import password as passwords
 

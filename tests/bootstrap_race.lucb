@@ -1,6 +1,6 @@
 ## Borrow native authorities until worker join; managed references stay on main.
-import luce_auth.auth
-import luce_prism.prism
+from luce_auth import auth
+from luce_prism import prism
 import thread
 
 var first: auth.Authority*?

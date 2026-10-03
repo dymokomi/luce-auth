@@ -1,7 +1,7 @@
-import luce_auth.auth
-import luce_prism.prism
+from luce_auth import auth
+from luce_prism import prism
 import interop
-import luce_crypto.native as crypto
+from luce_crypto import native as crypto
 
 func stored_session(token: str, output: u8[]) -> str!:
     var digest: u8[32]
