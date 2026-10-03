@@ -1,5 +1,5 @@
 ## Real full-cost KDF contention, without scheduler-dependent rejection counts.
-import password_records as password
+import luce_auth.password
 import thread
 
 var ready: @u32

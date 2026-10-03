@@ -1,10 +1,10 @@
 ## Users, one-use invitations and session tokens on a Prism store.
 import interop
 import memory
-import prism
-import crypto_native
+import luce_prism.prism
+import luce_crypto.native as crypto_native
 import time
-import luce_auth.password as passwords
+import password as passwords
 
 pub let invalid = prism.invalid
 pub let missing = prism.missing

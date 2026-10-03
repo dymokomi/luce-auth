@@ -1,6 +1,6 @@
 import interop
-import auth
-import prism
+import luce_auth.auth
+import luce_prism.prism
 
 pub func main(arguments: str[]) -> i32!:
     assert(arguments.length == 3)

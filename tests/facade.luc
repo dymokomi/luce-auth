@@ -1,4 +1,4 @@
-from auth import Authority
+from luce_auth.auth import Authority
 
 pub func main(arguments: list[str]) -> int!:
     let authority = Authority.open(arguments[0], "secret")
