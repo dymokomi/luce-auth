@@ -151,7 +151,7 @@ pub struct Authority:
     pub func init():
         return
 
-    pub func open(path: str, token: str, test_only: bool = false) -> interop.Reference[Authority]!:
+    pub static func open(path: str, token: str, test_only: bool = false) -> interop.Reference[Authority]!:
         if token.length == 0:
             error(invalid, "auth store token is required")
         let store = try prism.Store.open(path, token = token)
@@ -170,7 +170,7 @@ pub struct Authority:
         # adopt consumes/disposes native even when its allocation fails.
         return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
 
-    pub func attach(store: prism.Store*, test_only: bool = false) -> interop.Reference[Authority]!:
+    pub static func attach(store: prism.Store*, test_only: bool = false) -> interop.Reference[Authority]!:
         let native = try new Authority() in memory.heap
         native.borrowed = store
         native.owns = false
@@ -462,7 +462,7 @@ pub struct Authority:
         try tx.set((str)buffer[..<size], "name", who)
         return who
 
-    func require_unbound(tx: prism.Session*, path: str) -> !:
+    static func require_unbound(tx: prism.Session*, path: str) -> !:
         let existing: interop.Reference[prism.Value]? = tx.get(path, "signing_key") catch failure:
             if failure.code != missing: error(failure.code, failure.message)
             recover none
