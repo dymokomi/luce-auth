@@ -12,23 +12,23 @@ var conflicts: @u64
 var unexpected: @u64
 
 func attempt(authority: auth.Authority*, name: str):
-    discard(ready.add(1, .release))
+    _ = ready.add(1, .release)
     while start.load(.acquire) == 0: thread.sleep(1)
     authority.bootstrap(name, "test-password") catch failure:
         if failure.code == prism.conflict:
-            discard(conflicts.add(1, .relaxed))
+            _ = conflicts.add(1, .relaxed)
         else:
             print(failure.message)
-            discard(unexpected.add(1, .relaxed))
+            _ = unexpected.add(1, .relaxed)
         return
-    discard(successes.add(1, .relaxed))
+    _ = successes.add(1, .relaxed)
 
 func first_worker(raw: void*?):
-    discard(raw)
+    _ = raw
     if let authority = first: attempt(authority, "alice")
 
 func second_worker(raw: void*?):
-    discard(raw)
+    _ = raw
     if let authority = second: attempt(authority, "bob")
 
 pub func main(arguments: str[]) -> i32!:

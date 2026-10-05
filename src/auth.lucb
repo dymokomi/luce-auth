@@ -127,18 +127,18 @@ func join_prefix(prefix: const u8[], name: str, out: u8[]) -> usize!:
 func session_path(token: str, out: u8[]) -> usize!:
     if not valid_token(token): error(invalid, "invalid session token")
     var digest: u8[32]
-    discard(try crypto_native.digest(token.bytes, digest))
+    _ = try crypto_native.digest(token.bytes, digest)
     var encoded: u8[64]
-    discard(hex_encode(digest, encoded))
+    _ = hex_encode(digest, encoded)
     return try join_prefix(b"/sessions/", (str)encoded, out)
 
 ## Scoped credential secrets are also represented only by a SHA-256 storage key.
 func credential_path(token: str, out: u8[]) -> usize!:
     if not valid_credential_token(token): error(invalid, "invalid credential token")
     var digest: u8[32]
-    discard(try crypto_native.digest(token.bytes, digest))
+    _ = try crypto_native.digest(token.bytes, digest)
     var encoded: u8[64]
-    discard(hex_encode(digest, encoded))
+    _ = hex_encode(digest, encoded)
     return try join_prefix(b"/credentials/", (str)encoded, out)
 
 pub struct Authority:
@@ -151,7 +151,7 @@ pub struct Authority:
     pub func init():
         return
 
-    pub static func open(path: str, token: str, test_only: bool = false) -> interop.Reference[Authority]!:
+    pub func open(path: str, token: str, test_only: bool = false) -> interop.Reference[Authority]!:
         if token.length == 0:
             error(invalid, "auth store token is required")
         let store = try prism.Store.open(path, token = token)
@@ -170,7 +170,7 @@ pub struct Authority:
         # adopt consumes/disposes native even when its allocation fails.
         return try interop.Reference[Authority].adopt(native, authority_type, memory.heap)
 
-    pub static func attach(store: prism.Store*, test_only: bool = false) -> interop.Reference[Authority]!:
+    pub func attach(store: prism.Store*, test_only: bool = false) -> interop.Reference[Authority]!:
         let native = try new Authority() in memory.heap
         native.borrowed = store
         native.owns = false
@@ -199,8 +199,8 @@ pub struct Authority:
                 try tx.value().add(path, "directory")
                 changed = true
         if not changed: return
-        discard(try tx.value().commit())
-        discard(try store.bake())
+        _ = try tx.value().commit()
+        _ = try store.bake()
 
     pub func bootstrap(name: str, password: str) -> !:
         if not valid_name(name) or password.length == 0:
@@ -211,7 +211,7 @@ pub struct Authority:
         var raw: u8[16]
         try random_bytes(16, raw)
         var code: u8[32]
-        discard(hex_encode(raw, code))
+        _ = hex_encode(raw, code)
         let text = (str)code
         var path_buf: u8[48]
         let n = try join_prefix(b"/invites/", text, path_buf)
@@ -223,8 +223,8 @@ pub struct Authority:
         let flag = try prism.Value.text("open")
         defer flag.release()
         try tx.value().set(path, "state", flag)
-        discard(try tx.value().commit())
-        discard(try store.bake())
+        _ = try tx.value().commit()
+        _ = try store.bake()
         return try prism.Value.text(text)
 
     pub func accept(code: str, name: str, password: str) -> !:
@@ -268,8 +268,8 @@ pub struct Authority:
         let verifier = try prism.Value.array(prism.DType.uint8, [64], record)
         defer verifier.release()
         try tx.value().set(path, "password_record", verifier)
-        discard(try tx.value().commit(wait_ms = 1000))
-        discard(try store.bake(wait_ms = 1000))
+        _ = try tx.value().commit(wait_ms = 1000)
+        _ = try store.bake(wait_ms = 1000)
 
     pub func login(name: str, password: str) -> interop.Reference[prism.Value]!:
         if not valid_name(name) or password.length == 0 or password.length > 1024:
@@ -296,7 +296,7 @@ pub struct Authority:
         try random_bytes(16, raw)
         var token: u8[32]
         defer crypto_native.wipe(token)
-        discard(hex_encode(raw, token))
+        _ = hex_encode(raw, token)
         let text = (str)token
         var session_buffer: u8[80]
         let sn = try session_path(text, session_buffer)
@@ -313,8 +313,8 @@ pub struct Authority:
         defer expires.release()
         try tx.value().set(spath, "issued_at", created)
         try tx.value().set(spath, "expires_at", expires)
-        discard(try tx.value().commit())
-        discard(try store.bake())
+        _ = try tx.value().commit()
+        _ = try store.bake()
         return try prism.Value.text(text)
 
     pub func verify(token: str) -> interop.Reference[prism.Value]!:
@@ -344,7 +344,7 @@ pub struct Authority:
         try random_bytes(32, raw)
         var encoded: u8[64]
         defer crypto_native.wipe(encoded)
-        discard(hex_encode(raw, encoded))
+        _ = hex_encode(raw, encoded)
         let text = (str)encoded
         var path_buffer: u8[96]
         let size = try credential_path(text, path_buffer)
@@ -363,8 +363,8 @@ pub struct Authority:
         let expiry = try prism.Value.integer(issued + lifetime_seconds)
         defer expiry.release()
         try tx.value().set(path, "expires_at", expiry)
-        discard(try tx.value().commit(wait_ms = 1000))
-        discard(try store.bake(wait_ms = 1000))
+        _ = try tx.value().commit(wait_ms = 1000)
+        _ = try store.bake(wait_ms = 1000)
         return try prism.Value.text(text)
 
     ## Authorize one exact owner/repository/operation from a single snapshot.
@@ -400,8 +400,8 @@ pub struct Authority:
         let verifier = snap.value().get((str)user_buffer[..<user_size], "password_record") catch:
             error(invalid, "credential account is unavailable")
         defer verifier.release()
-        discard(passwords.profile_of(verifier.value().bytes(), allow_test = self.test_only) catch:
-            error(invalid, "credential account profile is disallowed"))
+        _ = passwords.profile_of(verifier.value().bytes(), allow_test = self.test_only) catch:
+            error(invalid, "credential account profile is disallowed")
         return who
 
     ## Revoke one credential owned by the authenticated session principal.
@@ -419,8 +419,8 @@ pub struct Authority:
         defer stored.release()
         if try stored.value().text_at() != try who.value().text_at(): error(invalid, "credential owner mismatch")
         try tx.value().remove(path)
-        discard(try tx.value().commit(wait_ms = 1000))
-        discard(try store.bake(wait_ms = 1000))
+        _ = try tx.value().commit(wait_ms = 1000)
+        _ = try store.bake(wait_ms = 1000)
 
     func session_principal(snap: prism.Session*, token: str) -> interop.Reference[prism.Value]!:
         if not valid_token(token):
@@ -449,8 +449,8 @@ pub struct Authority:
         let verifier = snap.get((str)user_buffer[..<user_size], "password_record") catch:
             error(invalid, "session password profile is unavailable")
         defer verifier.release()
-        discard(passwords.profile_of(verifier.value().bytes(), allow_test = self.test_only) catch:
-            error(invalid, "session password profile is disallowed"))
+        _ = passwords.profile_of(verifier.value().bytes(), allow_test = self.test_only) catch:
+            error(invalid, "session password profile is disallowed")
         return who
 
     func enrollment_session(tx: prism.Session*, token: str) -> interop.Reference[prism.Value]!:
@@ -480,10 +480,10 @@ pub struct Authority:
         let tx = try store.begin()
         defer tx.release()
         try tx.value().remove(path)
-        discard(try tx.value().commit())
-        discard(try store.bake())
+        _ = try tx.value().commit()
+        _ = try store.bake()
 
-    pub mutating func close():
+    pub func close():
         if not self.alive:
             return
         self.alive = false

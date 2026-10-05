@@ -9,24 +9,24 @@ var busy: @u32
 var unexpected: @u32
 
 func worker(raw: void*?):
-    discard(raw)
+    _ = raw
     var record: u8[64]
     for i in 0..<record.length: record[i] = 173
-    discard(ready.add(1, .release))
+    _ = ready.add(1, .release)
     while start.load(.acquire) == 0: thread.sleep(1)
     password.create(b"disposable stress password", record) catch failure:
         if failure.code == password.busy:
             for byte in record: assert(byte == 173)
-            discard(busy.add(1, .relaxed))
+            _ = busy.add(1, .relaxed)
         else:
-            discard(unexpected.add(1, .relaxed))
+            _ = unexpected.add(1, .relaxed)
         return
     let profile = password.profile_of(record) catch failure: trap(failure.message)
     assert(profile == password.Profile.interactive)
-    discard(successes.add(1, .relaxed))
+    _ = successes.add(1, .relaxed)
 
 pub func main(arguments: str[]) -> i32!:
-    discard(arguments)
+    _ = arguments
     var workers: thread.Handle[16]
     for i in 0..<(usize)16:
         workers[i] = thread.spawn(worker, none, name = "kdf-stress") catch failure:
