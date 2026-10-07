@@ -1,4 +1,0 @@
-pub func main(arguments: str[]) -> i32:
-    _ = arguments
-    print("PASS Luce Base heap instrumentation canary")
-    return 0

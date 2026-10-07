@@ -1,0 +1,42 @@
+# Accounts kept in Prism stores: each driver under drivers/ opens fresh store files in a
+# scratch directory (sessions, credentials, password storage profiles, the authority with
+# an attached store, atomic invitations, a bootstrap race run eight times, and the Luce
+# facade). This is a package of its own only for the dependencies the drivers name; they
+# use luce-auth's public modules. `luc test` runs it with LUCE and LUCE_BASE set.
+from luce_std import files, paths, process
+
+let failed = ErrorCode.package(1)
+
+pub func main(arguments: list[str]) -> int!:
+    let here = process.current_directory()
+    let base = process.variable("LUCE_BASE") else "luce-base"
+    let luce = process.variable("LUCE") else "luce"
+    let build = paths.join(paths.directory(paths.directory(here)), "build/tests/stores")
+    let binaries = paths.join(build, "drivers")
+    let scratch = paths.join(build, "data")
+    if files.exists(scratch):
+        files.remove_tree(scratch)
+    files.ensure_directory(binaries)
+    files.ensure_directory(scratch)
+    for name in ["sessions", "credentials", "password_storage", "check", "invite_atomic", "bootstrap_race", "facade"]:
+        let compiler = luce if name == "facade" else base
+        let source = paths.join(here, f"drivers/{name}.luc" if name == "facade" else f"drivers/{name}.lucb")
+        let built = process.run(compiler, ["build", source, "--native", "-o", paths.join(binaries, name)], here)
+        if built.exit_code != 0:
+            error(failed, f"build {name}: {built.output}{built.error_output}")
+    var runs = [["sessions", "sessions.db"], ["credentials", "credentials.db"],
+        ["password_storage", "production.db", "test-profile.db"], ["check", "auth.db", "attach.db"],
+        ["invite_atomic", "invite.db"]]
+    for attempt in 0..<8:
+        runs.append(["bootstrap_race", f"race-{attempt}.db"])
+    runs.append(["facade", "facade.db"])
+    for words in runs:
+        var stores: list[str] = []
+        for store in words[1..]:
+            stores.append(paths.join(scratch, store))
+        let ran = process.run(paths.join(binaries, words[0]), stores, here)
+        if ran.output != "":
+            print(ran.output.trim_end())
+        if ran.exit_code != 0:
+            error(failed, f"{words[0]}: exit status {ran.exit_code}\n{ran.error_output}")
+    return 0

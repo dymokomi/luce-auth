@@ -20,7 +20,8 @@ Exports: `auth` (the `Authority`) and `password_records`. Consumers:
 ## Test
 
 ```sh
-python3 tests/run.py --base ../luce-base/build/luce-base --luce ../luce/build/luce
-python3 tests/sanitize.py     # generated-C sanitizers, Linux
-python3 tests/heap.py         # macOS leak checks
+luc test
 ```
+
+`tests/password` and `tests/admission_stress` check password records and KDF admission;
+`tests/stores` runs the drivers in `tests/stores/drivers/` against fresh Prism stores.
